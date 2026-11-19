@@ -1,6 +1,6 @@
 import {
   hostOf, normalizeAlert, normalizeAlerts, timeBins, pickStep, topN,
-  severityCounts, addrScope, appIdSessions, appDistribution,
+  severityCounts, addrScope, appIdSessions, appDistribution, windowAlerts,
 } from './aggregate'
 
 const alert = (over = {}) => ({
@@ -76,6 +76,23 @@ test('topN ranks, folds the tail into other and counts missing keys', () => {
   expect(r.other).toBe(1)
   expect(r.missing).toBe(1)
   expect(r.distinct).toBe(3)
+})
+
+test('windowAlerts filters by since and detects truncation', () => {
+  const mk = n => Array.from({ length: n }, (_, i) => alert({ seconds: 100 + i }))
+  // server honoured since and returned fewer than cap + 1 -> complete window
+  let r = windowAlerts(mk(5), 100, 10)
+  expect([r.alerts.length, r.truncated]).toEqual([5, false])
+  // server hit the limit (cap + 1, all inside window) -> truncated, newest cap kept
+  r = windowAlerts(mk(11), 100, 10)
+  expect([r.alerts.length, r.truncated, r.alerts[0].seconds]).toEqual([10, true, 101])
+  // older server ignored since: alerts before the window are dropped, not truncated
+  r = windowAlerts(mk(11), 105, 10)
+  expect([r.alerts.length, r.truncated, r.alerts[0].seconds]).toEqual([6, false, 105])
+  // no since -> plain list
+  r = windowAlerts(mk(3), undefined, 10)
+  expect([r.alerts.length, r.truncated]).toEqual([3, false])
+  expect(windowAlerts(null, 100, 10)).toEqual({ alerts: [], dropped: 0, truncated: false })
 })
 
 test('severityCounts', () => {

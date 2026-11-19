@@ -1,49 +1,148 @@
 # snort_log_view
-**Colorized HTML table view for Snort alerts, AppID, and performance monitor logs.**  
-The **Perf** tab automatically hides fields with zero values.  
-Alert information is used to generate a **Wireshark filter** based on timestamp data.  
-The **AppID** feature displays real-time data. It uses the `appid_listener` feature from [snort3_extra](https://github.com/snort3/snort3_extra).  
-The server reads the following log files: 
-  
-- `/var/log/snort/alert_json.txt`
-- `/var/log/snort/appid.json`
-- `/var/log/snort/perf_monitor_base.csv`
 
-## install  
-/snort_log_view/client$ npm install  
-/snort_log_view/server$ npm install  
-### start
-/snort_log_view/server$ sudo npm start  
-/snort_log_view/client$ npm start  
+**A web UI for Snort 3 logs: a security overview dashboard plus views for alerts, AppID
+sessions, alert search and performance counters.**
 
-## snort.lua:
-  
-perf_monitor = {}  
-  
-alert_json =  
-{        
-&ensp;&ensp;&ensp;&ensp;file = true,    
-&ensp;&ensp;&ensp;&ensp;limit = 100,  
-&ensp;&ensp;&ensp;&ensp;fields = 'timestamp iface src_addr src_port dst_addr dst_port proto action msg priority class sid dir dst_ap eth_dst eth_len eth_src eth_type gid icmp_code iface ip_id ip_len mpls pkt_gen pkt_len pkt_num rev rule seconds service src_ap target tcp_ack tcp_flags tcp_len tcp_seq tcp_win tos ttl udp_len vlan'  
-}  
--- only timestamp, priority, rule, proto, src_ap, dst_ap, msg, class and seconds are mandatory  
-  
-appid_listener =  
-{  
-&ensp;&ensp;&ensp;&ensp;json_logging = true,  
-&ensp;&ensp;&ensp;&ensp;file = "/var/log/snort/appid.json",  
-}  
+The server reads Snort's log files directly. No database is needed:
 
-## screenshots  
-The overview view    
-![overview](/screenshots/f.png)
-The alert view shows the latest alerts   
-![alert view](/screenshots/a.png)   
-Appid view is updated with a socket connection.  
-![appid view](/screenshots/b.png)  
-The search tab has various search and arrangement features
-![search view](/screenshots/c.png)  
-![search view](/screenshots/d.png)  
-Performance monitor data in table
-![perf monitor view](/screenshots/e.png) 
+- `/var/log/snort/alert_json.txt` (`alert_json`)
+- `/var/log/snort/appid.json` (`appid_listener` from [snort3_extra](https://github.com/snort3/snort3_extra))
+- `/var/log/snort/perf_monitor_base.csv` (`perf_monitor`)
 
+> **Running Snort on Windows?** [ENVIRONMENT.md](ENVIRONMENT.md) is a step-by-step guide
+> for monitoring a **Windows host's network traffic** with Snort 3 running in **WSL2**. It
+> covers forwarding the Windows capture (Npcap/`dumpcap`) to a virtual interface in WSL,
+> the `snort.lua` settings, systemd services, starting at logon and the Node.js setup.
+> The same `snort.lua` settings apply on a plain Linux machine.
+
+## Features
+
+| Tab | What it shows |
+|---|---|
+| **Overview** | Security dashboard for a time window (15 min, 1 h, 6 h, 24 h or the latest 5,000 alerts). It shows alert activity over time stacked by severity, the share of each severity, top source and destination IPs, top signatures, protocols, destination ports, classifications and the AppID application mix. An event timeline and a recent-events list open a details panel with addresses, ports, protocol, rule (gid:sid:rev) and a Wireshark filter. Clicking a bar, a severity or a time column filters every chart. |
+| **Alerts** | The latest alerts, refreshed every 5 seconds. Click a row to see all fields and a **Wireshark filter** built from the packet timestamp. |
+| **AppID** | AppID sessions streamed live over a socket connection. |
+| **Search** | Load the latest N alerts, filter them by time range or by text (include or exclude), sort by any column, or sort by rarity. |
+| **Performance** | `perf_monitor` counters for the current Snort run. Counters that stay at zero are hidden. |
+
+Severity follows the Snort priority: **P1 high**, **P2 medium**, **P3 low**, **P4 very low**.
+**P0** means the rule sets no priority. The colours are the same in every view.
+
+## Requirements
+
+- Snort 3 with `alert_json`, `perf_monitor` and `appid`, and `appid_listener` from snort3_extra
+- Node.js 18 or newer (tested with 22). On WSL, use a Linux Node such as nvm, not the
+  Windows one. See [ENVIRONMENT.md § 11](ENVIRONMENT.md#11-nodejs-environment-for-snort_log_view).
+
+## Snort configuration
+
+Add the following to `snort.lua`:
+
+```lua
+perf_monitor = { }
+
+alert_json =
+{
+    file = true,
+    limit = 100,
+    fields = 'timestamp iface src_addr src_port dst_addr dst_port proto action msg priority class sid dir dst_ap eth_dst eth_len eth_src eth_type gid icmp_code ip_id ip_len mpls pkt_gen pkt_len pkt_num rev rule seconds service src_ap target tcp_ack tcp_flags tcp_len tcp_seq tcp_win tos ttl udp_len vlan'
+}
+-- only timestamp, priority, rule, proto, src_ap, dst_ap, msg, class and seconds are mandatory
+
+appid = { }
+
+appid_listener =
+{
+    json_logging = true,
+    file = '/var/log/snort/appid.json',
+}
+```
+
+Two options cannot be set in `snort.lua` and must go on the command line:
+
+```bash
+snort -c /usr/local/etc/snort/snort.lua \
+      -l /var/log/snort \
+      --plugin-path /usr/local/lib/snort/plugins/extra
+```
+
+- `-l /var/log/snort` puts the log files where the server looks for them.
+- `--plugin-path` loads `appid_listener`. Without it the plugin is silently missing.
+
+The full, tested configuration (including the live-interface settings) is in
+[`snort/snort.lua`](snort/snort.lua) and explained in [ENVIRONMENT.md § 5](ENVIRONMENT.md#5-configure-snortlua).
+
+## Install
+
+```bash
+cd server && npm install
+cd ../client && npm install
+```
+
+## Start
+
+```bash
+# server: REST API on :9000, AppID socket on :3009
+cd server
+sudo env "PATH=$PATH" npm start
+
+# client: development server on :3000
+cd client
+npm start
+```
+
+Open <http://localhost:3000>.
+
+- The server runs with `sudo` because Snort writes `alert_json.txt` readable by root only.
+  `env "PATH=$PATH"` lets `sudo` find a Node installed with nvm.
+- Start the server with `npm start`, not `node app.js`. Only `npm start` opens the REST API
+  on port 9000, which the Overview, Alerts, Search and Performance tabs need.
+- Restart the server after updating the code.
+
+### Configuration
+
+| Variable | Where | Default |
+|---|---|---|
+| `PORT` | server: REST API port | `9000` |
+| `REACT_APP_API` | client: REST API URL | `http://<page host>:9000` |
+| `REACT_APP_SOCKET` | client: AppID socket URL | `ws://<page host>:3009` |
+
+## API
+
+All endpoints return JSON. Log files are read from the end, so large logs don't slow them down.
+
+| Endpoint | Returns |
+|---|---|
+| `GET /alerts` | the newest 38 alerts |
+| `GET /alerts_all/:amount` | the newest `amount` alerts (max 200,000) |
+| `GET /alerts_all/:amount?since=<epoch s>` | alerts with `seconds >= since`, at most the newest `amount` |
+| `GET /appid/:amount` | the newest `amount` AppID events from `appid.json` |
+| `GET /perf` | `perf_monitor_base.csv` rows of the current Snort run, header first |
+| socket.io `:3009`, event `json` | each new `appid.json` line as it is written |
+
+Malformed or half-written log lines are skipped.
+
+## Tests
+
+```bash
+cd client
+npm test
+```
+
+## Screenshots
+
+The overview view
+![overview](/screenshots/g.png)
+The alert view shows the latest alerts
+![alert view](/screenshots/a.png)
+The AppID view is updated over a socket connection
+![appid view](/screenshots/b.png)
+The search tab has various search and sorting features
+![search view](/screenshots/c.png)
+![search view](/screenshots/d.png)
+Performance monitor data in a table
+![perf monitor view](/screenshots/e.png)
+
+## License
+
+[GPL-3.0](LICENSE)

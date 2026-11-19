@@ -488,3 +488,4 @@ html, body { background: var(--bg); }
   .ov-grid4 { grid-template-columns: minmax(0, 1fr); }
   .ov-filters-right { margin-left: 0; }
 }
+.warn { color: var(--p2); font-size: 12px; }

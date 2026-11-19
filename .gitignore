@@ -3,3 +3,6 @@
 /server/alerts.json
 /server/appid.json
 /server/alerts_all.json
+
+plan*
+*Zone.Identifier

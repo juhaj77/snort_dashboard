@@ -5,12 +5,21 @@ import { ActivityChart, BarList, SeverityBar, SwimLane } from './charts'
 import EventDetails from './EventDetails'
 import AppIdSummary from './AppIdSummary'
 import {
-  normalizeAlerts, timeBins, topN, severityCounts, distinctCount, addrScope,
+  windowAlerts, timeBins, topN, severityCounts, distinctCount, addrScope,
 } from './aggregate'
 import { sevLabel } from './severity'
 import { fmtClock, fmtDay, fmtNum, fmtSpan, fmtStep, hostPort } from './format'
 
-const WINDOWS = [1000, 5000, 10000, 20000]
+// Time windows ask the server for alerts since a moment (`?since=`), capped at
+// TIME_CAP alerts; the count window is the old "latest N" behaviour.
+const WINDOWS = [
+  { id: '15m', label: '15 min', minutes: 15 },
+  { id: '1h', label: '1 h', minutes: 60 },
+  { id: '6h', label: '6 h', minutes: 360 },
+  { id: '24h', label: '24 h', minutes: 1440 },
+  { id: 'n5000', label: 'latest 5,000', count: 5000 },
+]
+const TIME_CAP = 20000
 const REFRESH_MS = 60000
 const TIMELINE_CAP = 3000
 const RECENT_ROWS = 100
@@ -26,22 +35,31 @@ const FOCUS = {
   cls: { label: 'Class', get: a => a.cls },
 }
 
-/** Poll a JSON endpoint; keeps the previous data while refetching. */
-const usePoll = (path, intervalMs) => {
-  const [state, setState] = useState({ data: null, error: null, loading: true, updated: null })
+/**
+ * Poll a JSON endpoint; keeps the previous data while refetching.
+ * `request()` is called on every load and returns { path, meta }; `meta` is kept
+ * next to the data it produced (e.g. the `since` used for that fetch).
+ * The poll restarts whenever `key` changes.
+ */
+const usePoll = (request, intervalMs, key) => {
+  const [state, setState] = useState({ data: null, meta: null, error: null, loading: true, updated: null })
   const timer = useRef(0)
   const alive = useRef(true)
+  const requestRef = useRef(request)
+  requestRef.current = request
   const load = useCallback(async () => {
     clearTimeout(timer.current)
     setState(s => ({ ...s, loading: true }))
+    const { path, meta } = requestRef.current()
     try {
       const data = await getJson(path)
-      if (alive.current) setState({ data, error: null, loading: false, updated: Date.now() })
+      if (alive.current) setState({ data, meta, error: null, loading: false, updated: Date.now() })
     } catch (error) {
       if (alive.current) setState(s => ({ ...s, error, loading: false }))
     }
     if (alive.current) timer.current = setTimeout(load, intervalMs)
-  }, [path, intervalMs])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key, intervalMs])
   useEffect(() => {
     alive.current = true
     load()
@@ -73,14 +91,25 @@ const ScopeTag = ({ ip }) => {
 }
 
 function Overview() {
-  const [windowSize, setWindowSize] = useState(5000)
-  const [alertsState, reloadAlerts] = usePoll(`/alerts_all/${windowSize}`, REFRESH_MS)
-  const [appidState, reloadAppid] = usePoll('/appid/5000', REFRESH_MS)
+  const [windowId, setWindowId] = useState('1h')
+  const win = WINDOWS.find(w => w.id === windowId)
+  const [alertsState, reloadAlerts] = usePoll(() => {
+    if (win.count) return { path: `/alerts_all/${win.count}`, meta: { win } }
+    const now = Math.floor(Date.now() / 1000)
+    const since = now - win.minutes * 60
+    // ask for one more than the cap so truncation can be detected
+    return { path: `/alerts_all/${TIME_CAP + 1}?since=${since}`, meta: { win, since, now } }
+  }, REFRESH_MS, windowId)
+  const [appidState, reloadAppid] = usePoll(() => ({ path: '/appid/5000' }), REFRESH_MS, 'appid')
   const [focus, setFocus] = useState([]) // [{ field, value }]
   const [slice, setSlice] = useState(null) // { from, to } from the activity chart
   const [selected, setSelected] = useState(null)
 
-  const { alerts, dropped } = useMemo(() => normalizeAlerts(alertsState.data), [alertsState.data])
+  const meta = alertsState.meta || {}
+  const { alerts, dropped, truncated } = useMemo(
+    () => windowAlerts(alertsState.data, meta.since, TIME_CAP),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [alertsState.data])
 
   const toggleFocus = useCallback((field, value) => {
     setFocus(f => f.some(x => x.field === field && x.value === value)
@@ -95,7 +124,12 @@ function Overview() {
     () => (slice ? focused.filter(a => a.seconds >= slice.from && a.seconds < slice.to) : focused),
     [focused, slice])
 
-  const fullRange = alerts.length ? [alerts[0].seconds, alerts[alerts.length - 1].seconds] : [0, 0]
+  const dataRange = alerts.length ? [alerts[0].seconds, alerts[alerts.length - 1].seconds] : null
+  // Time window: the axis spans the whole window (quiet periods stay visible),
+  // except the part lost to truncation, which the data doesn't cover.
+  const fullRange = meta.since !== undefined
+    ? [truncated && dataRange ? dataRange[0] : meta.since, Math.max(meta.now, dataRange ? dataRange[1] : 0)]
+    : dataRange || [0, 0]
   const activity = useMemo(() => timeBins(focused, 60, alerts.length ? fullRange : undefined),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [focused, alerts])
@@ -111,7 +145,8 @@ function Overview() {
   }), [inView])
 
   const viewRange = inView.length ? [inView[0].seconds, inView[inView.length - 1].seconds] : fullRange
-  const span = viewRange[1] - viewRange[0]
+  // rate denominator: the selected interval, else the window, else the data's own span
+  const span = slice ? slice.to - slice.from : meta.since !== undefined ? fullRange[1] - fullRange[0] : viewRange[1] - viewRange[0]
   const timeline = inView.length > TIMELINE_CAP ? inView.slice(-TIMELINE_CAP) : inView
   const timelineRange = timeline.length ? [timeline[0].seconds, timeline[timeline.length - 1].seconds] : viewRange
   const recent = useMemo(() => inView.slice(-RECENT_ROWS).reverse(), [inView])
@@ -135,16 +170,21 @@ function Overview() {
         <span className="muted">Window</span>
         <div className="seg">
           {WINDOWS.map(w =>
-            <button key={w} type="button" className={w === windowSize ? 'seg-on' : ''}
-                    onClick={() => { setWindowSize(w); setSlice(null) }}>
-              last {fmtNum(w)}
+            <button key={w.id} type="button" className={w.id === windowId ? 'seg-on' : ''}
+                    onClick={() => { setWindowId(w.id); setSlice(null) }}>
+              {w.label}
             </button>)}
         </div>
         <span className="muted">
           {alerts.length
-            ? <>alerts covering <strong className="hl">{fmtSpan(fullRange[1] - fullRange[0])}</strong> · {fmtDay(fullRange[0])} {fmtClock(fullRange[0], false)} – {fmtClock(fullRange[1], false)}</>
-            : 'no alerts in alert_json.txt'}
+            ? <><strong className="hl">{fmtNum(alerts.length)}</strong> alerts · {fmtDay(fullRange[0])} {fmtClock(fullRange[0], false)} – {fmtClock(fullRange[1], false)}
+                {!meta.since && <> · covering <strong className="hl">{fmtSpan(fullRange[1] - fullRange[0])}</strong></>}</>
+            : meta.since !== undefined ? `no alerts in the last ${win.label}` : 'no alerts in alert_json.txt'}
         </span>
+        {truncated &&
+          <span className="warn" title={`More than ${fmtNum(TIME_CAP)} alerts in this window; the oldest ones were not loaded.`}>
+            ⚠ limited to newest {fmtNum(TIME_CAP)} — covers only {fmtSpan(fullRange[1] - fullRange[0])} of {win.label}
+          </span>}
         {focus.map(f =>
           <button key={f.field} type="button" className="chip" onClick={() => toggleFocus(f.field, f.value)}>
             {FOCUS[f.field].label}: <strong>{FOCUS[f.field].show ? FOCUS[f.field].show(f.value) : String(f.value)}</strong> ×
@@ -165,7 +205,7 @@ function Overview() {
       <div className="ov-summary">
         <div className="kpis">
           <Kpi label={isFiltered ? 'Alerts in view' : 'Alerts'} value={fmtNum(inView.length)}
-               sub={isFiltered ? `of ${fmtNum(alerts.length)} loaded` : dropped ? `${fmtNum(dropped)} unreadable skipped` : 'in window'} />
+               sub={isFiltered ? `of ${fmtNum(alerts.length)} loaded` : dropped ? `${fmtNum(dropped)} unreadable skipped` : meta.since !== undefined ? `last ${win.label}` : 'in window'} />
           <Kpi label="Rate" value={span > 0 ? (inView.length / (span / 60)).toFixed(1) : '—'} sub="alerts / min avg" />
           <Kpi label="Sources" value={fmtNum(distinctCount(inView, a => a.srcIp))} sub="distinct IPs" />
           <Kpi label="Destinations" value={fmtNum(distinctCount(inView, a => a.dstIp))} sub="distinct IPs" />

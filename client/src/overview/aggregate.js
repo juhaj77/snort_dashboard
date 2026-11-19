@@ -59,6 +59,22 @@ export const normalizeAlerts = list => {
   return { alerts, dropped: list.length - alerts.length }
 }
 
+/**
+ * Alerts of a time window fetched with `?since=` and a limit of cap + 1.
+ * - Filters by `since` here too, so a server that ignores `since` (older version)
+ *   cannot inflate the window.
+ * - truncated: the server hit the limit while every returned alert was still
+ *   inside the window, i.e. older alerts of the window were not loaded.
+ * Without `since` this is plain normalisation.
+ */
+export const windowAlerts = (data, since, cap) => {
+  const { alerts, dropped } = normalizeAlerts(data)
+  if (since === undefined || since === null) return { alerts, dropped, truncated: false }
+  const inWindow = alerts.filter(a => a.seconds >= since)
+  const truncated = Array.isArray(data) && data.length > cap && inWindow.length === alerts.length
+  return { alerts: inWindow.length > cap ? inWindow.slice(-cap) : inWindow, dropped, truncated }
+}
+
 export const severityCounts = alerts => {
   const c = emptySevCounts()
   alerts.forEach(a => { c[a.priority] += 1 })

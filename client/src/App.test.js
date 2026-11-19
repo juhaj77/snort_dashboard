@@ -4,7 +4,7 @@ import App from './App';
 jest.mock('socket.io-client', () => () => ({ on: jest.fn(), off: jest.fn(), connected: false }));
 
 const alert = (i, over = {}) => ({
-  timestamp: `11/19-18:00:${String(i).padStart(2, '0')}.000001`, seconds: 1795104000 + i,
+  timestamp: `11/19-18:00:${String(i).padStart(2, '0')}.000001`, seconds: Math.floor(Date.now() / 1000) - 600 + i,
   priority: i % 2 ? 3 : 1, proto: 'UDP', src_addr: '192.168.1.10', src_port: 5000 + i,
   dst_addr: '8.8.8.8', dst_port: 53, src_ap: `192.168.1.10:${5000 + i}`, dst_ap: '8.8.8.8:53',
   msg: i % 2 ? 'low thing' : 'bad thing', rule: i % 2 ? '1:2:1' : '1:3:1', class: 'Misc Attack',
@@ -33,6 +33,10 @@ test('overview summarises alerts, skips malformed records and shows event detail
   expect(screen.getByText('1 unreadable skipped')).toBeInTheDocument();
   expect(screen.getAllByText('192.168.1.10').length).toBeGreaterThan(0);
   expect(await screen.findByText('DNS')).toBeInTheDocument();
+  // default window is the last hour, requested from the server with ?since=
+  const url = global.fetch.mock.calls.map(c => c[0]).find(u => u.includes('/alerts_all/'));
+  const since = Number(new URL(url).searchParams.get('since'));
+  expect(Math.abs(Date.now() / 1000 - 3600 - since)).toBeLessThan(5);
 
   fireEvent.click(screen.getAllByText('bad thing').map(e => e.closest('.ev')).find(Boolean));
   expect(screen.getByText('Find with Wireshark')).toBeInTheDocument();

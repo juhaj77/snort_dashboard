@@ -52,6 +52,36 @@ async function readTail(file, findStart) {
 const lastLines = (file, n) =>
   readTail(file, lines => (lines.length >= n ? lines.length - n : -1))
 
+/** `seconds` of a JSON log line, or null if the line can't be parsed. */
+const secondsOf = line => {
+  try {
+    const s = Number(JSON.parse(line).seconds)
+    return Number.isFinite(s) ? s : null
+  } catch (e) {
+    return null
+  }
+}
+
+/**
+ * Lines of a JSON-lines log whose `seconds` >= since, newest `cap` at most.
+ * Snort appends in time order, so reading stops at the first older line.
+ */
+const linesSince = (file, since, cap) =>
+  readTail(file, lines => {
+    // oldest complete line we have so far that carries a timestamp
+    let oldest = null
+    for (let i = 0; i < lines.length && oldest === null; i++) oldest = secondsOf(lines[i])
+    const enough = lines.length >= cap
+    if (!enough && (oldest === null || oldest >= since)) return -1 // keep reading backwards
+    let start = lines.length
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const s = secondsOf(lines[i])
+      if (s !== null && s < since) break
+      start = i
+    }
+    return Math.max(start, lines.length - cap)
+  })
+
 /** Parse JSON lines, skipping any line that is incomplete or malformed. */
 const parseJsonLines = lines =>
   lines.reduce((out, l) => {
@@ -63,4 +93,4 @@ const parseJsonLines = lines =>
     return out
   }, [])
 
-module.exports = { readTail, lastLines, parseJsonLines }
+module.exports = { readTail, lastLines, linesSince, parseJsonLines }
