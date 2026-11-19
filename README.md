@@ -1,7 +1,9 @@
-# snort_log_view
+# snort_log_view: Snort 3 IDS dashboard and log viewer
 
-**A web UI for Snort 3 logs: a security overview dashboard plus views for alerts, AppID
-sessions, alert search and performance counters.**
+**A web UI for Snort 3 intrusion detection (IDS) logs: a SOC-style network security overview
+dashboard plus views for alerts, AppID sessions, alert search and performance counters.**
+Built with React and Node.js/Express for home labs, blue teams and anyone running Snort on
+Linux or on Windows through WSL2.
 
 The server reads Snort's log files directly. No database is needed:
 
