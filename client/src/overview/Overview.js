@@ -3,6 +3,7 @@ import { getJson } from '../api'
 import { PriorityBadge, Status } from '../Panel'
 import { ActivityChart, BarList, SeverityBar, SwimLane } from './charts'
 import EventDetails from './EventDetails'
+import { Section, Kpi } from './ui'
 import AppIdSummary from './AppIdSummary'
 import {
   windowAlerts, timeBins, topN, severityCounts, distinctCount, addrScope,
@@ -67,23 +68,6 @@ const usePoll = (request, intervalMs, key) => {
   }, [load])
   return [state, load]
 }
-
-const Section = ({ title, note, right, className = '', children }) =>
-  <section className={'card ' + className}>
-    <header className="card-head">
-      <h3>{title}</h3>
-      {note && <span className="card-sub">{note}</span>}
-      {right && <span className="card-right">{right}</span>}
-    </header>
-    {children}
-  </section>
-
-const Kpi = ({ label, value, sub }) =>
-  <div className="kpi">
-    <div className="kpi-label">{label}</div>
-    <div className="kpi-value">{value}</div>
-    {sub && <div className="kpi-sub">{sub}</div>}
-  </div>
 
 const ScopeTag = ({ ip }) => {
   const s = addrScope(ip)

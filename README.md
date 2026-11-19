@@ -134,7 +134,7 @@ npm test
 ## Screenshots
 
 The overview view
-![overview](/screenshots/g.png)
+![overview](/screenshots/h.png)
 The alert view shows the latest alerts
 ![alert view](/screenshots/a.png)
 The AppID view is updated over a socket connection
@@ -143,7 +143,7 @@ The search tab has various search and sorting features
 ![search view](/screenshots/c.png)
 ![search view](/screenshots/d.png)
 Performance monitor data in a table
-![perf monitor view](/screenshots/e.png)
+![perf monitor view](/screenshots/i.png)
 
 ## License
 

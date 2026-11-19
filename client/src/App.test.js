@@ -48,3 +48,37 @@ test('overview shows an error when the server is unreachable', async () => {
   render(<App />);
   expect(await screen.findByText(/Could not load data from the server/)).toBeInTheDocument();
 });
+
+test('AppID tab shows existing events immediately instead of waiting for live data', async () => {
+  const ev = (n, service) => ({
+    session_num: `0.${n}`, pkt_time: `2026-11-19 18:16:0${n}.000001`, pkt_num: n, proto: 'TCP',
+    apps: { service, client: null, payload: null },
+    client_info: { ip: '192.168.1.5', port: 50000 + n }, service_info: { ip: '1.1.1.1', port: 443 },
+    dns_host: null, tls_host: `host${n}.example`,
+  });
+  global.fetch = jest.fn(url => Promise.resolve({
+    ok: true,
+    json: () => Promise.resolve(url.includes('/appid/') ? [ev(1, 'HTTPS'), 'junk', ev(2, 'unknown')] : []),
+  }));
+  render(<App />);
+  fireEvent.click(screen.getByRole('button', { name: 'AppID' }));
+  expect(await screen.findByText('host2.example')).toBeInTheDocument();
+  expect(screen.getByText('host1.example')).toBeInTheDocument();
+  const hosts = screen.getAllByText(/host\d\.example/).map(e => e.textContent);
+  expect(hosts).toEqual(['host2.example', 'host1.example']); // newest first
+});
+
+test('Performance tab summarises perf_monitor data', async () => {
+  const perf = [
+    '#timestamp,daq.received,daq.dropped,daq.rx_bytes,detection.alerts,stream.flows,stream.current_flows,stream_tcp.sessions,stream_tcp.gaps',
+    '1000,1000,0,1000000,10,5,3,4,0',
+    '1060,6000,60,6000000,30,12,7,9,2',
+  ];
+  global.fetch = jest.fn(url => Promise.resolve({ ok: true, json: () => Promise.resolve(url.endsWith('/perf') ? perf : []) }));
+  render(<App />);
+  fireEvent.click(screen.getByRole('button', { name: 'Performance' }));
+  expect(await screen.findByText('Packet drops')).toBeInTheDocument();
+  expect(screen.getByText('0.86%')).toBeInTheDocument();     // 60 / 7000 dropped over the run
+  expect(screen.getByText('now 100 pkt/s')).toBeInTheDocument(); // 6000 packets in 60 s
+  expect(screen.getByText('TCP gaps')).toBeInTheDocument();
+});

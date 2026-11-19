@@ -250,3 +250,141 @@ export const SwimLane = ({ alerts, range, selectedId, onSelect }) => {
     </div>
   )
 }
+
+/**
+ * Time series on one y-axis.
+ * mode 'step': values[i] is an average over (t[i-1], t[i]] (perf_monitor intervals),
+ *              drawn as a horizontal segment across that interval; values[0] is ignored.
+ * mode 'line': values[i] is an instantaneous reading at t[i].
+ * series: [{ key, label, color, values }], ≥2 series get a legend.
+ */
+export const TimeSeries = ({ t, series, mode = 'step', format = v => fmtNum(Math.round(v)), height = 150 }) => {
+  const [ref, width] = useWidth()
+  const [hover, setHover] = useState(null)
+  const m = { l: 52, r: 10, t: 8, b: 22 }
+  const n = t.length
+  const plotW = Math.max(1, width - m.l - m.r)
+  const plotH = height - m.t - m.b
+  const t0 = n ? t[0] : 0
+  const t1 = n ? t[n - 1] : 1
+  const span = Math.max(1, t1 - t0)
+  const x = s => m.l + ((s - t0) / span) * plotW
+  const all = series.flatMap(s => s.values.filter((v, i) => v !== null && (mode === 'line' || i > 0)))
+  const yMax = niceMax(Math.max(0, ...all) || 1)
+  const y = v => m.t + plotH - (v / yMax) * plotH
+  const ticks = [0, 0.5, 1].map(k => k * yMax)
+  const single = series.length === 1
+
+  const pathOf = values => {
+    let d = ''
+    let pen = false
+    for (let i = mode === 'step' ? 1 : 0; i < n; i++) {
+      const v = values[i]
+      if (v === null || v === undefined) { pen = false; continue }
+      if (mode === 'step') {
+        d += (pen ? 'L' : 'M') + x(t[i - 1]) + ',' + y(v) + 'L' + x(t[i]) + ',' + y(v)
+      } else {
+        d += (pen ? 'L' : 'M') + x(t[i]) + ',' + y(v)
+      }
+      pen = true
+    }
+    return d
+  }
+  const areaOf = values => {
+    // close the line path down to the baseline, segment by segment
+    const segs = pathOf(values).split('M').filter(Boolean)
+    return segs.map(s => {
+      const pts = s.split('L')
+      const first = pts[0].split(',')[0], last = pts[pts.length - 1].split(',')[0]
+      return `M${first},${y(0)}L${s}L${last},${y(0)}Z`
+    }).join('')
+  }
+
+  const onMove = e => {
+    const px = e.nativeEvent.offsetX
+    const ts = t0 + ((px - m.l) / plotW) * span
+    let i
+    if (mode === 'step') {
+      i = t.findIndex((tt, k) => k > 0 && ts > t[k - 1] && ts <= tt)
+      if (i === -1) i = ts <= t0 ? 1 : n - 1
+    } else {
+      i = 0
+      t.forEach((tt, k) => { if (Math.abs(tt - ts) < Math.abs(t[i] - ts)) i = k })
+    }
+    if (i < 0 || i >= n || (mode === 'step' && i === 0)) return setHover(null)
+    setHover({ i, x: px, y: e.nativeEvent.offsetY })
+  }
+
+  const hasData = all.length > 0
+  const xTickCount = Math.max(2, Math.min(6, Math.floor(plotW / 90)))
+  const xTicks = Array.from({ length: xTickCount }, (_, k) => t0 + (span * k) / (xTickCount - 1))
+
+  return (
+    <div className="viz" ref={ref} onMouseLeave={() => setHover(null)}>
+      {!single &&
+        <div className="ts-legend">
+          {series.map(s => <span key={s.key}><i className="swatch" style={{ background: s.color }} />{s.label}</span>)}
+        </div>}
+      {!hasData && <div className="viz-empty">Not enough samples yet.</div>}
+      {width > 0 && hasData &&
+        <svg width={width} height={height} onMouseMove={onMove} role="img"
+             aria-label={series.map(s => s.label).join(', ') + ' over time'}>
+          {ticks.map(tk =>
+            <g key={tk}>
+              <line x1={m.l} x2={width - m.r} y1={y(tk)} y2={y(tk)} className={tk === 0 ? 'viz-base' : 'viz-grid'} />
+              <text x={m.l - 6} y={y(tk) + 4} className="viz-tick" textAnchor="end">{format(tk)}</text>
+            </g>)}
+          {xTicks.map((tk, k) =>
+            <text key={k} x={x(tk)} y={height - 6} className="viz-tick"
+                  textAnchor={k === 0 ? 'start' : k === xTicks.length - 1 ? 'end' : 'middle'}>
+              {(span > 86400 ? fmtDay(tk) + ' ' : '') + fmtClock(tk, false)}
+            </text>)}
+          {single && <path d={areaOf(series[0].values)} style={{ fill: series[0].color, opacity: 0.1 }} />}
+          {series.map(s =>
+            <path key={s.key} d={pathOf(s.values)} fill="none" style={{ stroke: s.color }}
+                  strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />)}
+          {hover && <>
+            {mode === 'step'
+              ? <rect x={x(t[hover.i - 1])} y={m.t} width={Math.max(1, x(t[hover.i]) - x(t[hover.i - 1]))} height={plotH} className="ts-band" />
+              : <line x1={x(t[hover.i])} x2={x(t[hover.i])} y1={m.t} y2={m.t + plotH} className="ts-cross" />}
+            {series.map(s => s.values[hover.i] !== null && s.values[hover.i] !== undefined &&
+              <circle key={s.key} cx={x(t[hover.i])} cy={y(s.values[hover.i])} r={4}
+                      style={{ fill: s.color }} className="dot" />)}
+          </>}
+        </svg>}
+      {hover &&
+        <Tip x={hover.x} y={hover.y} width={width}>
+          <div className="tip-head">
+            {mode === 'step'
+              ? <>{fmtClock(t[hover.i - 1])} – {fmtClock(t[hover.i])} · avg over {fmtNum(t[hover.i] - t[hover.i - 1])} s</>
+              : <>{fmtDay(t[hover.i])} {fmtClock(t[hover.i])}</>}
+          </div>
+          {series.map(s =>
+            <div className="tip-row" key={s.key}>
+              <strong>{s.values[hover.i] === null || s.values[hover.i] === undefined ? '—' : format(s.values[hover.i])}</strong>
+              <span>{!single && <i className="swatch" style={{ background: s.color }} />}{s.label}</span>
+            </div>)}
+        </Tip>}
+    </div>
+  )
+}
+
+/** Tiny step sparkline for per-interval values (no axes; trend only). */
+export const Sparkline = ({ t, values, width = 96, height = 20, color = 'var(--bar)' }) => {
+  const n = t.length
+  if (n < 2) return <svg width={width} height={height} />
+  const t0 = t[0], span = Math.max(1, t[n - 1] - t0)
+  const max = Math.max(...values.filter(v => v !== null), 0) || 1
+  const x = s => ((s - t0) / span) * (width - 2) + 1
+  const y = v => height - 2 - (v / max) * (height - 4)
+  let d = ''
+  for (let i = 1; i < n; i++) {
+    const v = values[i]
+    if (v === null) continue
+    d += (d ? 'L' : 'M') + x(t[i - 1]) + ',' + y(v) + 'L' + x(t[i]) + ',' + y(v)
+  }
+  return <svg width={width} height={height} aria-hidden="true">
+    <line x1="0" x2={width} y1={height - 1.5} y2={height - 1.5} className="viz-grid" />
+    <path d={d} fill="none" style={{ stroke: color }} strokeWidth="1.5" />
+  </svg>
+}

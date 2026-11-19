@@ -25,6 +25,10 @@
   --p0: #4f5d6e;
 
   --bar: #3cc6b4;      /* single-series bars (counts without severity) */
+  /* categorical series (validated all-pairs for ≤3 series on the navy surface) */
+  --s1: #3987e5;
+  --s2: #d95926;
+  --s3: #199e70;
   --grid: #1c2a3b;
   --axis: #2c3e55;
 }
@@ -489,3 +493,27 @@ html, body { background: var(--bg); }
   .ov-filters-right { margin-left: 0; }
 }
 .warn { color: var(--p2); font-size: 12px; }
+
+/* =================== Performance =================== */
+.kpis-6 { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+.kpi-warn .kpi-value { color: var(--p2); }
+.perf-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.ts-legend { display: flex; gap: 14px; font-size: 12px; color: var(--text); margin: -2px 0 4px; }
+.ts-legend span { display: inline-flex; align-items: center; gap: 4px; }
+.ts-band { fill: var(--text-strong); opacity: .06; }
+.ts-cross { stroke: var(--axis); stroke-width: 1; }
+.raw-name { font-size: 10px; margin-left: 6px; overflow: hidden; text-overflow: ellipsis; }
+.raw-search { width: 22em; margin-bottom: 8px; }
+.health { display: flex; flex-direction: column; }
+.health-row {
+  display: grid; grid-template-columns: minmax(0, 1fr) 96px 5em; align-items: center; gap: 10px;
+  padding: 4px 4px; border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent); font-size: 12px;
+}
+.health-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-strong); }
+.health-total { text-align: right; font-variant-numeric: tabular-nums; color: var(--text-strong); }
+@media (max-width: 1100px) {
+  .kpis-6 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .kpis-6 .kpi:nth-child(4) { border-left: 0; }
+  .kpis-6 .kpi:nth-child(n+4) { border-top: 1px solid var(--border); }
+  .perf-grid { grid-template-columns: minmax(0, 1fr); }
+}
