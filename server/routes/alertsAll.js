@@ -1,28 +1,19 @@
-var express = require('express');
-const fs = require('fs')
-//const readLastLines = require('read-last-lines');
-var router = express.Router();
-var Tail = require('tail').Tail;
+const express = require('express')
+const { lastLines, parseJsonLines } = require('../lib/readTail')
 
-router.get('/:amount',async function(req, res, next) {
-    let array = new Array()
-    const tail = new Tail('/var/log/snort/alert_json.txt',{nLines:req.params.amount})
-    tail.on('line', data => {
-        array.push(JSON.parse(data))
-    })
-    setTimeout(() => {
-        res.send(array)
-        tail.unwatch()
-    },req.params.amount/2) //Time in milliseconds to read lines. 
+const router = express.Router()
+const FILE = '/var/log/snort/alert_json.txt'
+const MAX = 200000
 
-   /* This solution took 30 seconds:
-    readLastLines.read('/var/log/snort/alert_json.txt', 1000)
-	.then(async (lines) => {
-        array = await lines.split('\n')
-        array.pop()
-        res.send(array.map(item => JSON.parse(item)))
-        res.end()
-    });*/
-});
+router.get('/:amount', async (req, res) => {
+  const amount = parseInt(req.params.amount, 10)
+  if (!(amount > 0)) return res.status(400).json({ error: 'amount must be a positive number' })
+  try {
+    res.json(parseJsonLines(await lastLines(FILE, Math.min(amount, MAX))))
+  } catch (e) {
+    console.log(e.message)
+    res.status(500).json({ error: e.message })
+  }
+})
 
-module.exports = router;
+module.exports = router

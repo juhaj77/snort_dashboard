@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react'
-import StyledSpinner from './StyledSpinner'
-import './App.css';
-import Alert from './Alert';
+import Alert, { AlertHeader } from './Alert';
+import { Panel, Status } from './Panel';
+import { getJson } from './api';
+
+const DATE_HINT = 'YYYY-MM-DDTHH:mm:ss or MM/DD-HH:mm:ss'
 
 function Search() {
-
   const [alertsArray, setAlertsArray] = useState([])
   const [alertsToShow, setAlertsToShow] = useState([])
   const [startString, setStartString] = useState('')
@@ -12,162 +13,135 @@ function Search() {
   const [mode, setMode] = useState('search')
   const [filter, setFilter] = useState('')
   const [alerts, setAlerts] = useState(1000)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
 
   const callServer = async (amount) => {
-    await fetch(`http://localhost:9000/alerts_all/${amount}`)
-        .then(res => res.text())
-        .then(res => {
-          setAlertsArray(JSON.parse(res))
-          setAlertsToShow(JSON.parse(res))
-        })
-        .catch(err => err);
-  }
-
-  const sortAlerts = (sorter) => {
-    let clone = [...alertsToShow]
-    clone.sort((a,b) => a[sorter] > b[sorter] ? 1 : -1)
-    setAlertsToShow(clone)
-  }
-
-  const updateMode = (newMode) => {
-    setMode(newMode)
-    filterAlerts(filter,newMode)
+    setLoading(true)
+    try {
+      const data = await getJson(`/alerts_all/${amount}`)
+      setAlertsArray(data)
+      setAlertsToShow(data)
+      setError(null)
+    } catch (e) {
+      setError(e)
+    }
+    setLoading(false)
   }
 
   useEffect(() => {
     callServer(alerts)
-  },[])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
-  const filterByDate =() => {
-    setFilter('')
-    const date = new Date()
-    let d1 = new Date(startString)
-    let d2 = new Date(endString)
-    let inv1 = d1.toDateString() === "Invalid Date"
-    let inv2 = d2.toDateString() === "Invalid Date"
-
-    //This is for Chrome
-    if(!inv1 && d1.getUTCFullYear() === 2001) d1.setUTCFullYear(date.getUTCFullYear())
-    if(!inv2 && d2.getUTCFullYear() === 2001) d2.setUTCFullYear(date.getUTCFullYear())
-
-    if(inv1 && startString !== ''){
-      const dt = startString.split('-')
-      const d = dt[0].split('/')
-      const standard = date.getUTCFullYear(date)+'-'+d[0]+'-'+d[1]+'T'+dt[1]
-      d1 = new Date(standard)
-      inv1 = d1.toDateString() === "Invalid Date"
-    }
-
-    if(inv2 && endString !== ''){
-      const dt = endString.split('-')
-      const d = dt[0].split('/')
-      const standard = date.getUTCFullYear(date)+'-'+d[0]+'-'+d[1]+'T'+dt[1]
-      d2 = new Date(standard)
-      inv2 = d2.toDateString() === "Invalid Date"
-    }
-
-    if(!inv1 && !inv2){
-      setAlertsToShow(alertsArray.filter((alert) => alert.seconds >= d1.getTime()/1000 && alert.seconds <= d2.getTime()/1000))
-    } else if(!inv1 && inv2){
-      setAlertsToShow(alertsArray.filter((alert) => alert.seconds >= d1.getTime()/1000))
-    } else if(inv1 && !inv2){
-      setAlertsToShow(alertsArray.filter((alert) => alert.seconds <= d2.getTime()/1000
-      ))
-    } else {
-      setAlertsToShow(alertsArray)
-    }
+  const sortAlerts = (sorter) => {
+    const clone = [...alertsToShow]
+    clone.sort((a, b) => a[sorter] > b[sorter] ? 1 : -1)
+    setAlertsToShow(clone)
   }
 
-  const filterAlerts = (str,mod) => {
+  const parseDate = (str, now) => {
+    if (str === '') return null
+    let d = new Date(str)
+    if (!isNaN(d)) {
+      // Chrome parses dates without a year as 2001
+      if (d.getUTCFullYear() === 2001) d.setUTCFullYear(now.getUTCFullYear())
+      return d
+    }
+    const dt = str.split('-')
+    const md = dt[0].split('/')
+    d = new Date(now.getUTCFullYear() + '-' + md[0] + '-' + md[1] + 'T' + dt[1])
+    return isNaN(d) ? null : d
+  }
+
+  const filterByDate = () => {
+    setFilter('')
+    const now = new Date()
+    const d1 = parseDate(startString, now)
+    const d2 = parseDate(endString, now)
+    setAlertsToShow(alertsArray.filter(a =>
+      (!d1 || a.seconds >= d1.getTime() / 1000) && (!d2 || a.seconds <= d2.getTime() / 1000)))
+  }
+
+  const filterAlerts = (str, mod) => {
     setFilter(str)
     setStartString('')
     setEndString('')
-    if(mod === 'search') setAlertsToShow(alertsArray.filter(alert => alert.msg.indexOf(str) !== -1 || alert.class.indexOf(str) !== -1))
-    if(mod === 'reject') setAlertsToShow(alertsArray.filter(alert => alert.msg.indexOf(str) === -1 && alert.class.indexOf(str) === -1))
-    if(str === '') setAlertsToShow(alertsArray)
+    const hit = a => a.msg.indexOf(str) !== -1 || a.class.indexOf(str) !== -1
+    if (str === '') setAlertsToShow(alertsArray)
+    else if (mod === 'search') setAlertsToShow(alertsArray.filter(hit))
+    else setAlertsToShow(alertsArray.filter(a => !hit(a)))
+  }
+
+  const updateMode = (newMode) => {
+    setMode(newMode)
+    filterAlerts(filter, newMode)
   }
 
   const sortByRarity = () => {
-    const eventsByType = alertsToShow.reduce((alarms,alarm) => {
-      alarms[alarm['rule']] = alarms[alarm['rule']] || []
-      alarms[alarm['rule']].push({...alarm})
-      return alarms
+    const byRule = alertsToShow.reduce((acc, a) => {
+      (acc[a.rule] = acc[a.rule] || []).push(a)
+      return acc
     }, {})
-    let grouped = Object.values(eventsByType)
-    grouped.sort((A,B) => A.length > B.length ? 1 : -1)
-    let result = []
-    grouped.forEach(subarray => {
-      subarray.forEach(alert => {
-        result.push(alert)
-      })
-    })
-    setAlertsToShow(result)
+    const grouped = Object.values(byRule).sort((A, B) => A.length - B.length)
+    setAlertsToShow(grouped.flat())
   }
+
   const handleAmount = str => {
-    if(isNaN(str)) return
+    if (isNaN(str)) return
     setAlerts(str)
-    callServer(str)
   }
-  return alertsToShow.length === 0 ? <StyledSpinner/> : 
-    <div className="mytable">
-      <div style={{
-        marginTop:"3em",
-        alignItems:"start"}}>
-      
-      <div className="search">
-        <div style={{whiteSpace:'nowrap'}}>&#160;&#160;get&#160;&#160;
-          <input style={{width:'4em'}} value={alerts} onChange={(event) => handleAmount(event.target.value)}/>
-          &#160;&#160;alerts&#160;&#160;
+
+  return (
+    <Panel title="Search · alert history" accent="amber"
+           description="Load the latest N alerts from alert_json.txt, then narrow them down by time or text. Click a column header to sort.">
+      <div className="toolbar">
+        <div className="field">
+          <label>Load</label>
+          <input className="input input-num" value={alerts}
+                 onChange={e => handleAmount(e.target.value)}
+                 onKeyDown={e => e.key === 'Enter' && callServer(alerts)} />
+          <span className="muted">alerts</span>
+          <button className="btn" onClick={() => callServer(alerts)}>Load</button>
         </div>
-       
-        <div style={{
-          lineHeight:'1em',
-          padding:'.3em 1em .2em 1em',
-          fontWeight:'700',
-          background:'darkred'}}>filters:</div>
-        <span className="date">start date</span>
-        <div className="tooltip">
-          <input value={startString} onChange={(event) => setStartString(event.target.value)}/>
-          <span className="tooltiptext">
-            &#160;&#160;&#160;YYYY-MM-DDTHH:mm:ss <span style={{color:"red"}}>or</span> MM/DD-HH:mm:ss&#160;&#160;&#160;
-          </span>
+        <div className="divider" />
+        <div className="field">
+          <label>From</label>
+          <input className="input input-date" placeholder={DATE_HINT} title={DATE_HINT}
+                 value={startString} onChange={e => setStartString(e.target.value)} />
+          <label>to</label>
+          <input className="input input-date" placeholder={DATE_HINT} title={DATE_HINT}
+                 value={endString} onChange={e => setEndString(e.target.value)} />
+          <button className="btn" onClick={filterByDate}>Apply</button>
         </div>
-        <span className="date">end date</span>
-        <div className="tooltip">
-          <input value={endString} onChange={(event) => setEndString(event.target.value)}/>
-          <span className="tooltiptext">
-            &#160;&#160;&#160;YYYY-MM-DDTHH:mm:ss <span style={{color:"red"}}>or</span> MM/DD-HH:mm:ss&#160;&#160;&#160;
-          </span>
+        <div className="divider" />
+        <div className="field field-grow">
+          <select className="input" value={mode} onChange={e => updateMode(e.target.value)}>
+            <option value="search">include</option>
+            <option value="reject">exclude</option>
+          </select>
+          <input className="input input-grow" placeholder="message or classification contains…"
+                 value={filter} onChange={e => filterAlerts(e.target.value, mode)} />
+          <button className="btn" title="Group by rule, rarest first" onClick={sortByRarity}>Rarest first</button>
         </div>
-        <button onClick={filterByDate}>:submit</button>
-        <select className="dropdown" onChange={event => updateMode(event.target.value)}>
-          <option value="search">search:</option>
-          <option value="reject">reject:</option>
-        </select>
-        <input value={filter} onChange={event => filterAlerts(event.target.value,mode)} style={{width:"100%"}} ></input>
-        <div className="tooltip">
-          <button onClick={sortByRarity}>R</button>
-          <span className="tooltiptext">&#160;&#160;&#160;sort by rarity&#160;&#160;&#160;</span>
-        </div>
-        
       </div>
-      <table >
-        <tbody>
-          <tr style={{backgroundColor:'#0f0f0f'}}>
-            <td className="sort" onClick={() => sortAlerts('timestamp')}>timestamp</td>
-            <td className="sort" onClick={() => sortAlerts('priority')}>P</td>
-            <td className="sort" onClick={() => sortAlerts('rule')}>rule</td>
-            <td className="sort" onClick={() => sortAlerts('proto')}>proto</td>
-            <td className="sort" onClick={() => sortAlerts('src_ap')}>source</td>
-            <td className="sort" onClick={() => sortAlerts('dst_ap')}>destination</td>
-            <td className="sort" onClick={() => sortAlerts('msg')}>alert message</td>
-            <td className="sort" onClick={() => sortAlerts('class')}>classification</td>
-          </tr>
-          {alertsToShow.map((e) => <Alert key={e.timestamp+Math.random()} json={e} />)}
-        </tbody>
-      </table>
+      <div className="result-count muted">
+        {loading ? 'Loading…' : `${alertsToShow.length} of ${alertsArray.length} alerts`}
       </div>
-    </div>
+      {alertsToShow.length === 0
+        ? (loading || error
+            ? <Status error={error} text="Loading alerts…" />
+            : <div className="status">No alerts match the filter.</div>)
+        : <div className="table-wrap">
+            <table className="grid">
+              <AlertHeader onSort={sortAlerts} />
+              <tbody>
+                {alertsToShow.map((e, i) => <Alert key={e.timestamp + i} json={e} />)}
+              </tbody>
+            </table>
+          </div>}
+    </Panel>
+  )
 }
 
 export default Search;

@@ -13,7 +13,6 @@ The server reads the following log files:
 /snort_log_view/client$ npm install  
 /snort_log_view/server$ npm install  
 ### start
-/snort_log_view/server$ export NODE_OPTIONS=--max-old-space-size=8192    
 /snort_log_view/server$ sudo npm start  
 /snort_log_view/client$ npm start  
 
@@ -37,13 +36,12 @@ appid_listener =
 
 ## screenshots  
 The alert view shows the latest alerts   
-![alert view](https://github.com/juhaj77/snort_log_view/blob/main/screenshots/1.png)   
+![alert view](/screenshots/a.png)   
 Appid view is updated with a socket connection.  
-![appid view](https://github.com/juhaj77/snort_log_view/blob/main/screenshots/2.png)  
+![appid view](/screenshots/b.png)  
 The search tab has various search and arrangement features
-![search view](https://github.com/juhaj77/snort_log_view/blob/main/screenshots/3.png)  
-![search view](https://github.com/juhaj77/snort_log_view/blob/main/screenshots/4.png)  
+![search view](/screenshots/c.png)  
+![search view](/screenshots/d.png)  
 Performance monitor data in table
-![perf monitor view](https://github.com/juhaj77/snort_log_view/blob/main/screenshots/6.png) 
-### todo
-Find a faster solution than read-last-lines.
+![perf monitor view](/screenshots/e.png) 
+

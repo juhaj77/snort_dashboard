@@ -1,18 +1,16 @@
-var express = require('express');
-const fs = require('fs')
-const readLastLines = require('read-last-lines');
-var router = express.Router();
+const express = require('express')
+const { lastLines, parseJsonLines } = require('../lib/readTail')
 
-router.get('/',async function(req, res, next) {
-    let array = new Array()
-    
-    readLastLines.read('/var/log/snort/alert_json.txt', 38)
-	.then(async (lines) => {
-        array = await lines.split('\n')
-        array.pop()
-        res.send(array.map(item => JSON.parse(item)))
-        res.end()
-    });
-});
+const router = express.Router()
+const FILE = '/var/log/snort/alert_json.txt'
 
-module.exports = router;
+router.get('/', async (req, res) => {
+  try {
+    res.json(parseJsonLines(await lastLines(FILE, 38)))
+  } catch (e) {
+    console.log(e.message)
+    res.status(500).json({ error: e.message })
+  }
+})
+
+module.exports = router

@@ -33,9 +33,12 @@ io.on('connection', function (socket) {
   console.log('client connect');
 });
 const tail = new Tail('/var/log/snort/appid.json')
-tail.on('line', (data) => {   
-  json = JSON.parse(data)
-  io.sockets.emit('json', json)
+tail.on('line', (data) => {
+  try {
+    io.sockets.emit('json', JSON.parse(data))
+  } catch (e) {
+    /* incomplete line while Snort is writing */
+  }
 });
 tail.on('error', error => console.log(error))
 

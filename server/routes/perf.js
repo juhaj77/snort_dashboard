@@ -1,48 +1,25 @@
-var express = require('express');
-var router = express.Router();
-//const readLastLines = require('read-last-lines');
-var Tail = require('tail').Tail;
+const express = require('express')
+const { readTail } = require('../lib/readTail')
 
-const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms))
+const router = express.Router()
+const FILE = '/var/log/snort/perf_monitor_base.csv'
 
-router.get('/',async function(req, res, next) {
-    let index = 1
-    let response = ''
-    let array = []
-    try {
-        do {
-            array = []
-            const tail = new Tail('/var/log/snort/perf_monitor_base.csv',{nLines:index})
-            tail.on('line', data => {
-                array.push(data)
-            })
-            await sleep(index*4) // time for reading
-            response = array
-            index++
-        } while (array[0].split(',')[0] != '#timestamp')
-        res.send(response)
-    } catch (e) {
-        console.log(e.message)
-        res.status(500)
-        res.end()
-    }
-});
+// Snort appends to the CSV on every start and writes a new '#timestamp,...' header
+// each time. Return the newest header and the rows after it.
+const findLastHeader = lines => {
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (lines[i].startsWith('#timestamp')) return i
+  }
+  return -1
+}
 
-/* // very slow solution if there is a lot of data
-router.get('/',async function(req, res, next) {
-    let array = []
-    let index = 1
-    let response = ''
-    do {
-        await readLastLines.read('/var/log/snort/perf_monitor_base.csv', index)
-            .then(lines => {
-                array = lines.split('\n')
-                response = lines
-            })
-        index++
-    } while (array[0].split(',')[0] != '#timestamp')
+router.get('/', async (req, res) => {
+  try {
+    res.json(await readTail(FILE, findLastHeader))
+  } catch (e) {
+    console.log(e.message)
+    res.status(500).json({ error: e.message })
+  }
+})
 
-    res.send(response)
-});
-*/
-module.exports = router;
+module.exports = router

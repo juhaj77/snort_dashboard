@@ -1,46 +1,49 @@
-import React, { useState, useEffect,useRef } from 'react'
-import StyledSpinner from './StyledSpinner'
-import './App.css';
-import Alert from './Alert';
+import React, { useState, useEffect, useRef } from 'react'
+import Alert, { AlertHeader } from './Alert';
+import { Panel, Status, PriorityBadge } from './Panel';
+import { getJson } from './api';
 
 function Alerts() {
-
   const [alertsArray, setAlertsArray] = useState([])
+  const [error, setError] = useState(null)
   const timeoutId = useRef(0)
 
-  const callServer = async () => {
-    await fetch("http://localhost:9000/alerts")
-        .then(res => res.text())
-        .then(res => {
-          setAlertsArray(JSON.parse(res))})
-        .catch(err => err);
-        clearTimeout(timeoutId.current)
-        timeoutId.current = setTimeout(() => callServer(), 5000);
-  }
-
   useEffect(() => {
+    let alive = true
+    const callServer = async () => {
+      try {
+        const data = await getJson('/alerts')
+        if (!alive) return
+        setAlertsArray(data.reverse())
+        setError(null)
+      } catch (e) {
+        if (alive) setError(e)
+      }
+      if (alive) timeoutId.current = setTimeout(callServer, 5000)
+    }
     callServer()
-    return () => clearTimeout(timeoutId.current)
-  },[])
+    return () => { alive = false; clearTimeout(timeoutId.current) }
+  }, [])
 
-  return alertsArray.length === 0 ? <StyledSpinner/> :
-    <div className="App">
-      <table className="mytable" style={{paddingTop:'2em'}}>
-        <tbody>
-          <tr style={{backgroundColor:'black'}}>
-            <th>timestamp</th>
-            <th>P</th>
-            <th>rule</th>
-            <th>proto</th>
-            <th>source</th>
-            <th>destination</th>
-            <th>alert message</th>
-            <th>classification</th>
-          </tr>
-          {alertsArray.map((e) => <Alert key={e.timestamp} json={e} />)}
-        </tbody>
-      </table>
-    </div>
+  const legend = <div className="legend">
+    {[1, 2, 3, 4].map(p => <PriorityBadge key={p} p={p} />)}
+  </div>
+
+  return (
+    <Panel title="Alerts · latest" right={legend}
+           description="The newest alerts from alert_json.txt, newest first. Refreshes every 5 seconds. Click a row for details and a Wireshark filter.">
+      {alertsArray.length === 0
+        ? <Status error={error} />
+        : <div className="table-wrap">
+            <table className="grid">
+              <AlertHeader />
+              <tbody>
+                {alertsArray.map((e, i) => <Alert key={e.timestamp + i} json={e} />)}
+              </tbody>
+            </table>
+          </div>}
+    </Panel>
+  )
 }
 
 export default Alerts;

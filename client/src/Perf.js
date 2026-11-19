@@ -1,62 +1,75 @@
 import React, { useState, useEffect, useRef } from 'react'
-import StyledSpinner from './StyledSpinner'
-import './App.css';
+import { Panel, Status } from './Panel';
+import { getJson } from './api';
+
+const parsePerf = (lines) => {
+  const rows = lines.map(l => l.split(','))
+  const header = rows[0]
+  const out = {}
+  header.forEach((name, i) => {
+    const values = rows.slice(1).map(r => r[i]).filter(v => v !== undefined && v !== '' && !isNaN(v))
+    // drop counters that never moved
+    if (values.length > 0 && values.every(v => Number(v) === 0)) return
+    out[name] = values
+  })
+  return out
+}
+
+const convertTime = (seconds) => {
+  const date = new Date(seconds * 1000)
+  const time = date.toTimeString().split(' ')
+  return (date.getMonth() + 1) + '/' + date.getDate() + ' ' + time[0]
+}
 
 function Perf() {
-
-    const [perfObject, setPerfObject] = useState({})
-    const perf = useRef()
-    const timeoutId = useRef(-1)
-
-    const callServer = async () => {
-        await fetch("http://localhost:9000/perf")
-            .then(async res => await res.text())
-            .then(async res => {
-                const resp = await JSON.parse(res)
-                perf.current = resp.map(l => l.split(','))
-                let hellishObject = {}
-                for(let i = 0; i < perf.current[0].length; i++){
-                    hellishObject[perf.current[0][i]] = []
-                    for(let j = 1; j < perf.current.length; j++){
-                        if(!isNaN(perf.current[j][i])) hellishObject[perf.current[0][i]].push(perf.current[j][i])
-                    } 
-                }
-                for(const key of Object.keys(hellishObject)){
-                    if(hellishObject[key].length > 0 && hellishObject[key].reduce((sum,value) => sum + value,0) == 0)
-                        delete hellishObject[key]
-                }
-                setPerfObject(hellishObject)
-            })
-        .catch(err => console.log(err));
-        clearTimeout(timeoutId.current)
-        timeoutId.current = setTimeout(callServer,120000)
-  }
+  const [perfObject, setPerfObject] = useState({})
+  const [error, setError] = useState(null)
+  const timeoutId = useRef(-1)
 
   useEffect(() => {
-   callServer()
-   return () => clearTimeout(timeoutId.current)
-  },[])
+    let alive = true
+    const callServer = async () => {
+      try {
+        const lines = await getJson('/perf')
+        if (!alive) return
+        setPerfObject(lines.length > 1 ? parsePerf(lines) : {})
+        setError(null)
+      } catch (e) {
+        if (alive) setError(e)
+      }
+      if (alive) timeoutId.current = setTimeout(callServer, 120000)
+    }
+    callServer()
+    return () => { alive = false; clearTimeout(timeoutId.current) }
+  }, [])
 
-  const convertTime = (seconds) => {
-    const date = new Date(seconds*1000)
-    const time = date.toTimeString().split(' ')
-    return (date.getMonth()+1)+'/'+date.getDate()+'-'+time[0]
-  }
+  const keys = Object.keys(perfObject).filter(k => k !== '#timestamp')
+  const stamps = perfObject['#timestamp'] || []
 
-  return Object.keys(perfObject).length === 0 ? <StyledSpinner/> :
-    <div className='perf'>
-        <table>
-            <tbody>
-            {Object.keys(perfObject).map(key => <tr key={Math.random()}>
-                <td >{key === '#timestamp' ? 'date M/D-HH:mm:ss' : key}</td>
-                {perfObject[key].map(value => <td key={Math.random()} style={{whiteSpace:'nowrap'}}>
-                    {key === '#timestamp' ? convertTime(value) : value}
-                    </td>)}
-            </tr>)}
-            </tbody>
-        </table>
-    </div>
-  
+  return (
+    <Panel title="Performance · perf_monitor" accent="purple"
+           description="Counters from the current Snort run (since the last header in perf_monitor_base.csv). Counters that stayed at zero are hidden. Refreshes every 2 minutes.">
+      {stamps.length === 0
+        ? <Status error={error} text="Waiting for the first perf_monitor sample…" />
+        : <div className="table-wrap">
+            <table className="grid perf">
+              <thead>
+                <tr>
+                  <th className="sticky">counter</th>
+                  {stamps.map((s, i) => <th key={i} className="num">{convertTime(s)}</th>)}
+                </tr>
+              </thead>
+              <tbody>
+                {keys.map(key =>
+                  <tr key={key} className="row">
+                    <td className="sticky">{key}</td>
+                    {perfObject[key].map((v, i) => <td key={i} className="mono num">{v}</td>)}
+                  </tr>)}
+              </tbody>
+            </table>
+          </div>}
+    </Panel>
+  )
 }
 
 export default Perf;

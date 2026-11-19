@@ -438,7 +438,7 @@ Remaining advisories need breaking upgrades and were left as they are:
 **Server (terminal 3).** [WSL]
 ```bash
 cd ~/projects/snort_log_view/server
-sudo env "PATH=$PATH" NODE_OPTIONS=--max-old-space-size=8192 npm start
+sudo env "PATH=$PATH" npm start
 ```
 
 **Client (terminal 4).** [WSL]
