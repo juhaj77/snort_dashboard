@@ -2,11 +2,11 @@ import React, { useState } from 'react'
 
 const AppIdRow = ({ json, onClick, open }) => {
   const unknown = json.apps.service === 'unknown'
-  return <tr className={`row ${unknown ? 'prio prio-2' : 'prio prio-0'}${open ? ' row-open' : ''}`} onClick={onClick}>
+  return <tr className={`row prio prio-none${open ? ' row-open' : ''}`} onClick={onClick}>
     <td className="mono muted">{json.count}</td>
     <td className="mono">{json.session_num}</td>
     <td className="mono">{json.pkt_time}</td>
-    <td>{unknown ? <span className="tag tag-warn">unknown</span> : json.apps.service}</td>
+    <td>{unknown ? <span className="tag tag-muted">unknown</span> : json.apps.service}</td>
     <td>{json.apps.client}</td>
     <td>{json.proto}</td>
     <td className="mono">{json.client_info.ip}</td>

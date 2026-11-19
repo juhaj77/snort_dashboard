@@ -4,8 +4,10 @@ import Alerts from './Alerts';
 import AppIds from './AppIds';
 import Search from './Search';
 import Perf from './Perf';
+import Overview from './overview/Overview';
 
 const TABS = [
+  ['OVERVIEW', 'Overview', Overview],
   ['ALERTS', 'Alerts', Alerts],
   ['APPID', 'AppID', AppIds],
   ['SEARCH', 'Search', Search],
@@ -13,7 +15,7 @@ const TABS = [
 ]
 
 const App = () => {
-  const [show, setShow] = useState('ALERTS')
+  const [show, setShow] = useState('OVERVIEW')
   const View = TABS.find(t => t[0] === show)[2]
   return (
     <div className="app">

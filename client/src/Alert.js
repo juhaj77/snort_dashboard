@@ -13,9 +13,9 @@ const Row = ({ className, onClick, json, open }) =>
     <td className="muted">{json.class}</td>
   </tr>
 
-const Alert = ({ json }) => {
-  const [showDetails, setShowDetails] = useState(false)
-  const bg = 'prio prio-' + json.priority
+/** Wireshark display filter matching the alert's packet time (1 µs window). */
+export const wiresharkFilter = (json) => {
+  if (!json || json.seconds === undefined || typeof json.timestamp !== 'string') return null
   const d = new Date(json.seconds * 1000)
   const d_array = d.toString().split(" ")
   const stamp = json.timestamp.split(".")
@@ -24,6 +24,13 @@ const Alert = ({ json }) => {
   const filter = 'frame.time >= "' + d_array[1] + ' ' + d_array[2] + ', ' + d_array[3] +
     ' ' + d_array[4] + '.' + stamp[1] + '" && frame.time <= "' + d_array[1] + ' ' + d_array[2] +
     ', ' + d_array[3] + ' ' + d_array[4] + '.' + stamp2[1] + '"'
+  return filter
+}
+
+const Alert = ({ json }) => {
+  const [showDetails, setShowDetails] = useState(false)
+  const bg = 'prio prio-' + json.priority
+  const filter = wiresharkFilter(json)
 
   const toggle = () => setShowDetails(!showDetails)
 

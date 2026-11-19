@@ -15,7 +15,7 @@ export const Panel = ({ title, accent = 'teal', description, right, children }) 
 export const Status = ({ error, text = 'Waiting for data…' }) =>
   <div className={error ? 'status status-error' : 'status'}>
     {error
-      ? <>Cannot reach the server: <code>{String(error.message || error)}</code></>
+      ? <>Could not load data from the server: <code>{String(error.message || error)}</code></>
       : <><span className="spinner" />{text}</>}
   </div>
 
