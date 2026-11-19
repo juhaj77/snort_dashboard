@@ -1,0 +1,13 @@
+[Unit]
+Description=Dummy interface snort0 for Windows capture forwarding (snort_log_view)
+Before=network.target snort.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStartPre=/usr/sbin/modprobe dummy
+ExecStart=/bin/sh -c 'ip link show snort0 >/dev/null 2>&1 || ip link add snort0 type dummy; ip link set snort0 mtu 65535; sysctl -q -w net.ipv6.conf.snort0.disable_ipv6=1; ip link set snort0 up'
+ExecStop=/usr/sbin/ip link del snort0
+
+[Install]
+WantedBy=multi-user.target

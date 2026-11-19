@@ -1,0 +1,17 @@
+[Unit]
+Description=Snort 3 IDS listening on snort0 (snort_log_view)
+Requires=snort0-iface.service
+After=snort0-iface.service
+
+[Service]
+Type=simple
+# Interface, snaplen and checksum mode come from snort.lua (daq / network).
+# -l and --plugin-path cannot be set from Lua, so they are given here.
+ExecStart=/usr/local/bin/snort -c /usr/local/etc/snort/snort.lua \
+    --plugin-path /usr/local/lib/snort/plugins/extra \
+    -l /var/log/snort -q
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
