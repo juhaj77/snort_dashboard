@@ -1,4 +1,4 @@
-# snort_log_view: Snort 3 IDS dashboard and log viewer
+# snort_dashboard: Snort 3 IDS dashboard and log viewer
 
 **A web UI for Snort 3 intrusion detection (IDS) logs: a SOC-style network security overview
 dashboard plus views for alerts, AppID sessions, alert search and performance counters.**
