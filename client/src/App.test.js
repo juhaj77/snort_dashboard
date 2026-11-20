@@ -24,7 +24,7 @@ test('renders the tabs with Overview first', async () => {
   render(<App />);
   await screen.findByText('Top sources');
   const tabs = screen.getAllByRole('button').filter(b => b.className.includes('tab')).map(b => b.textContent);
-  expect(tabs).toEqual(['Overview', 'Alerts', 'AppID', 'Search', 'Performance']);
+  expect(tabs).toEqual(['Overview', 'Network', 'Alerts', 'AppID', 'Search', 'Performance']);
 });
 
 test('overview summarises alerts, skips malformed records and shows event details', async () => {
@@ -81,4 +81,29 @@ test('Performance tab summarises perf_monitor data', async () => {
   expect(screen.getByText('0.86%')).toBeInTheDocument();     // 60 / 7000 dropped over the run
   expect(screen.getByText('now 100 pkt/s')).toBeInTheDocument(); // 6000 packets in 60 s
   expect(screen.getByText('TCP gaps')).toBeInTheDocument();
+});
+
+test('Network tab draws hosts from the connection snapshot and shows details', async () => {
+  const snap = {
+    source: 'windows', at: 1, via: ['netstat -ano'], names: {},
+    host: { name: 'pc', addrs: [{ ip: '192.168.1.217' }], gateway: '192.168.1.1' },
+    connections: [{ proto: 'TCP', state: 'ESTABLISHED', localIp: '192.168.1.217', localPort: 50000, remoteIp: '20.1.2.3', remotePort: 443, pid: 10, process: 'chrome.exe', direction: 'out' }],
+    listening: [{ proto: 'TCP', ip: '0.0.0.0', port: 135, process: 'svchost.exe' }],
+    neighbors: [],
+  };
+  const info = { platform: 'wsl', sources: [{ id: 'windows', label: 'Windows host' }, { id: 'linux', label: 'WSL' }], tools: { traceroute: true, nmap: false }, wire: { iface: 'snort0' } };
+  global.fetch = jest.fn(url => Promise.resolve({
+    ok: true,
+    json: () => Promise.resolve(url.includes('/network/snapshot') ? snap : url.includes('/network/rdns/') ? { names: ['host.example'] }
+      : url.endsWith('/network') ? info : []),
+  }));
+  render(<App />);
+  fireEvent.click(screen.getByRole('button', { name: 'Network' }));
+  expect(await screen.findByText('Connection map')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Windows host' })).toBeInTheDocument();
+  fireEvent.click(screen.getAllByText('20.1.2.3')[0].closest('tr'));
+  expect(await screen.findByText('host.example')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Port scan' })).toBeDisabled(); // no nmap
+  expect(screen.getByRole('button', { name: 'Traceroute' })).toBeEnabled();
+  expect(screen.getByText('TCP 135')).toBeInTheDocument();
 });

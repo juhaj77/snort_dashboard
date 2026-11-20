@@ -5,9 +5,11 @@ import AppIds from './AppIds';
 import Search from './Search';
 import Perf from './Perf';
 import Overview from './overview/Overview';
+import Network from './network/Network';
 
 const TABS = [
   ['OVERVIEW', 'Overview', Overview],
+  ['NETWORK', 'Network', Network],
   ['ALERTS', 'Alerts', Alerts],
   ['APPID', 'AppID', AppIds],
   ['SEARCH', 'Search', Search],

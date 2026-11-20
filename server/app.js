@@ -11,6 +11,7 @@ var alertsRouter = require('./routes/alerts');
 var alertsAllRouter = require('./routes/alertsAll');
 var perfRouter = require('./routes/perf');
 var appidRouter = require('./routes/appid');
+var networkRouter = require('./routes/network');
 var app = express();
 var io = require('socket.io')(app.listen(3009), {
   cors: {
@@ -47,6 +48,7 @@ app.use("/alerts", alertsRouter);
 app.use("/alerts_all", alertsAllRouter);
 app.use('/perf',perfRouter)
 app.use('/appid', appidRouter)
+app.use('/network', networkRouter)
 app.use(function(req, res, next) {
   next(createError(404));
 });

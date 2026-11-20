@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { getJson } from '../api'
+import React, { useCallback, useMemo, useState } from 'react'
+import usePoll from '../usePoll'
 import { PriorityBadge, Status } from '../Panel'
 import { ActivityChart, BarList, SeverityBar, SwimLane } from './charts'
 import EventDetails from './EventDetails'
@@ -34,39 +34,6 @@ const FOCUS = {
   proto: { label: 'Protocol', get: a => a.proto },
   dport: { label: 'Dst port', get: a => a.dstPort },
   cls: { label: 'Class', get: a => a.cls },
-}
-
-/**
- * Poll a JSON endpoint; keeps the previous data while refetching.
- * `request()` is called on every load and returns { path, meta }; `meta` is kept
- * next to the data it produced (e.g. the `since` used for that fetch).
- * The poll restarts whenever `key` changes.
- */
-const usePoll = (request, intervalMs, key) => {
-  const [state, setState] = useState({ data: null, meta: null, error: null, loading: true, updated: null })
-  const timer = useRef(0)
-  const alive = useRef(true)
-  const requestRef = useRef(request)
-  requestRef.current = request
-  const load = useCallback(async () => {
-    clearTimeout(timer.current)
-    setState(s => ({ ...s, loading: true }))
-    const { path, meta } = requestRef.current()
-    try {
-      const data = await getJson(path)
-      if (alive.current) setState({ data, meta, error: null, loading: false, updated: Date.now() })
-    } catch (error) {
-      if (alive.current) setState(s => ({ ...s, error, loading: false }))
-    }
-    if (alive.current) timer.current = setTimeout(load, intervalMs)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key, intervalMs])
-  useEffect(() => {
-    alive.current = true
-    load()
-    return () => { alive.current = false; clearTimeout(timer.current) }
-  }, [load])
-  return [state, load]
 }
 
 const ScopeTag = ({ ip }) => {
