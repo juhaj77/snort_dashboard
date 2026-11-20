@@ -594,3 +594,11 @@ html, body { background: var(--bg); }
 }
 .net-sev { display: inline-flex; gap: 8px; white-space: nowrap; align-items: center; }
 .net-listen td:nth-child(2) { white-space: normal; overflow-wrap: anywhere; }
+
+/* Alerts: paused while details are open */
+.paused {
+  display: inline-flex; align-items: center; gap: 6px; padding: 1px 8px; border-radius: 10px; font-size: 11px; font-weight: 600;
+  color: var(--amber); border: 1px solid color-mix(in srgb, var(--amber) 55%, transparent);
+  background: color-mix(in srgb, var(--amber) 14%, transparent); margin-right: 6px;
+}
+.paused-icon { width: 7px; height: 8px; border-left: 2px solid currentColor; border-right: 2px solid currentColor; }

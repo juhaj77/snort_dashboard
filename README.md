@@ -26,10 +26,10 @@ The server reads Snort's log files directly. No database is needed:
 |---|---|
 | **Overview** | Security dashboard for a time window (15 min, 1 h, 6 h, 24 h or the latest 5,000 alerts). It shows alert activity over time stacked by severity, the share of each severity, top source and destination IPs, top signatures, protocols, destination ports, classifications and the AppID application mix. An event timeline and a recent-events list open a details panel with addresses, ports, protocol, rule (gid:sid:rev) and a Wireshark filter. Clicking a bar, a severity or a time column filters every chart. |
 | **Network** | Live connection map in the style of a SOC console: this computer in the centre, every host it talks to around it, grouped by process, service or network and coloured by Snort alert severity. Select a host to see its connections, alerts, AppID data and names, and run a **traceroute** or (on your own network) an **nmap** port scan. Works on Linux and Windows, including a Windows host monitored from WSL. See [NETWORK.md](NETWORK.md). |
-| **Alerts** | The latest alerts, refreshed every 5 seconds. Click a row to see all fields and a **Wireshark filter** built from the packet timestamp. |
+| **Alerts** | The latest alerts, refreshed every 5 seconds (paused while an alert's details are open). Click a row to see all fields and a **Wireshark filter** built from the packet timestamp. |
 | **AppID** | The latest AppID sessions from `appid.json` as soon as the tab opens; new ones stream in live over a socket connection. |
 | **Search** | Load the latest N alerts, filter them by time range or by text (include or exclude), sort by any column, or sort by rarity. |
-| **Performance** | Health of the current Snort run from `perf_monitor`: packet rate, throughput, dropped packets, alerts, flows, inspector activity and traffic anomalies over time. All raw counters are one click away. |
+| **Performance** | Health of the current Snort run from `perf_monitor` over a chosen time range (1 h … 30 d or the whole run; long ranges are averaged on the server): packet rate, throughput, dropped packets, alerts, flows, inspector activity and traffic anomalies over time. All raw counters are one click away. |
 
 Severity follows the Snort priority: **P1 high**, **P2 medium**, **P3 low**, **P4 very low**.
 **P0** means the rule sets no priority. The colours are the same in every view.
@@ -125,6 +125,7 @@ All endpoints return JSON. Log files are read from the end, so large logs don't 
 | `GET /alerts_all/:amount?since=<epoch s>` | alerts with `seconds >= since`, at most the newest `amount` |
 | `GET /appid/:amount` | the newest `amount` AppID events from `appid.json` |
 | `GET /perf` | `perf_monitor_base.csv` rows of the current Snort run, header first |
+| `GET /perf?since=<epoch s>&points=<n>` | rows of the current run from `since` (`0` = whole run), folded into at most `n` (default 600) samples: counters summed, gauges newest; with run start and end |
 | `GET /network…` | connection snapshot, traceroute, nmap scan, LAN discovery, reverse DNS; see [NETWORK.md § API](NETWORK.md#api) |
 | socket.io `:3009`, event `json` | each new `appid.json` line as it is written |
 

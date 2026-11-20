@@ -1,4 +1,4 @@
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, act, waitFor } from '@testing-library/react';
 import App from './App';
 
 jest.mock('socket.io-client', () => () => ({ on: jest.fn(), off: jest.fn(), connected: false }));
@@ -74,7 +74,8 @@ test('Performance tab summarises perf_monitor data', async () => {
     '1000,1000,0,1000000,10,5,3,4,0',
     '1060,6000,60,6000000,30,12,7,9,2',
   ];
-  global.fetch = jest.fn(url => Promise.resolve({ ok: true, json: () => Promise.resolve(url.endsWith('/perf') ? perf : []) }));
+  global.fetch = jest.fn(url => Promise.resolve({ ok: true, json: () => Promise.resolve(url.includes('/perf?')
+    ? { lines: perf, runStart: 1000, runEnd: 1060, rows: 2, bucketed: false, anchor: false, step: null } : []) }));
   render(<App />);
   fireEvent.click(screen.getByRole('button', { name: 'Performance' }));
   expect(await screen.findByText('Packet drops')).toBeInTheDocument();
@@ -106,4 +107,44 @@ test('Network tab draws hosts from the connection snapshot and shows details', a
   expect(screen.getByRole('button', { name: 'Port scan' })).toBeDisabled(); // no nmap
   expect(screen.getByRole('button', { name: 'Traceroute' })).toBeEnabled();
   expect(screen.getByText('TCP 135')).toBeInTheDocument();
+});
+
+test('Performance range picker asks the server for that range', async () => {
+  localStorage.removeItem('perf.range');
+  const perf = ['#timestamp,daq.received', '1000,10', '1060,20'];
+  global.fetch = jest.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve(
+    { lines: perf, runStart: 1000, runEnd: 1060, rows: 2, bucketed: false, anchor: false, step: null }) }));
+  render(<App />);
+  fireEvent.click(screen.getByRole('button', { name: 'Performance' }));
+  await screen.findByText('Packet rate');
+  const sinceOf = () => Number(new URL(global.fetch.mock.calls.at(-1)[0]).searchParams.get('since'));
+  expect(Date.now() / 1000 - sinceOf()).toBeCloseTo(86400, -1); // default 24 h
+  fireEvent.click(screen.getByRole('button', { name: '7 d' }));
+  await waitFor(() => expect(Date.now() / 1000 - sinceOf()).toBeCloseTo(7 * 86400, -1));
+  await waitFor(() => expect(document.querySelector('.ov.stale')).toBeNull());
+  fireEvent.click(screen.getByRole('button', { name: 'Whole run' }));
+  await waitFor(() => expect(sinceOf()).toBe(0));
+  await waitFor(() => expect(document.querySelector('.ov.stale')).toBeNull());
+  expect(localStorage.getItem('perf.range')).toBe('run');
+});
+
+test('Alerts pause while details are open and catch up when closed', async () => {
+  jest.useFakeTimers();
+  let batch = [alert(1)];
+  global.fetch = jest.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([...batch]) }));
+  const { unmount } = render(<App />);
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Alerts' })); });
+  const row = (await screen.findByText(alert(1).timestamp)).closest('tr');
+  fireEvent.click(row);
+  expect(screen.getByRole('status')).toHaveTextContent('Paused');
+  batch = [alert(1), alert(2)];
+  await act(async () => { jest.advanceTimersByTime(5100); });
+  expect(screen.getByRole('status')).toHaveTextContent('Paused · 1 new');
+  expect(screen.queryByText(alert(2).timestamp)).toBeNull(); // list frozen, details still open
+  expect(screen.getByText('Find with Wireshark')).toBeInTheDocument();
+  fireEvent.click(row);
+  expect(await screen.findByText(alert(2).timestamp)).toBeInTheDocument();
+  expect(screen.queryByRole('status')).toBeNull();
+  unmount();
+  jest.useRealTimers();
 });

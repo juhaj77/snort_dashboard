@@ -34,8 +34,12 @@ export const parsePerf = lines => {
   return { columns, t: rows.map(r => r[0]), cols, dropped }
 }
 
-/** Convenience accessors over a parsed model. All return null for missing columns. */
-export const perfModel = lines => {
+/**
+ * Convenience accessors over a parsed model. All return null for missing columns.
+ * anchor: the first row lies before the selected range; it only marks where the first
+ * interval starts and is left out of totals.
+ */
+export const perfModel = (lines, { anchor = false } = {}) => {
   const p = parsePerf(lines)
   const n = p.t.length
   const get = name => p.cols.get(name) || null
@@ -51,7 +55,7 @@ export const perfModel = lines => {
   /** sum over the run (counters only) */
   const total = name => {
     const v = get(name)
-    return v ? v.reduce((s, x) => s + (x || 0), 0) : null
+    return v ? v.reduce((s, x, i) => (anchor && i === 0 ? s : s + (x || 0)), 0) : null
   }
   const latest = name => {
     const v = get(name)
@@ -73,7 +77,7 @@ export const perfModel = lines => {
   /** columns with any non-zero value */
   const nonZero = () => [...p.cols.entries()].filter(([, v]) => v.some(x => x)).map(([k]) => k)
 
-  return { ...p, n, intervals, get, has, rate, total, latest, latestOf, ratio, nonZero }
+  return { ...p, n, intervals, get, has, rate, total, latest, latestOf, ratio, nonZero, anchor: anchor && n > 0 }
 }
 
 /** Sum several columns row by row (missing columns are ignored; null if none exist). */

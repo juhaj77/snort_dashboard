@@ -11,6 +11,16 @@ const DROP_WARN_PCT = 1
 const STALE_S = 15 * 60
 
 const C1 = 'var(--s1)', C2 = 'var(--s2)', C3 = 'var(--s3)'
+const POINTS = 600 // the server folds longer ranges into at most this many samples
+
+export const RANGES = [
+  ['1h', '1 h', 3600], ['6h', '6 h', 6 * 3600], ['24h', '24 h', 86400],
+  ['7d', '7 d', 7 * 86400], ['30d', '30 d', 30 * 86400], ['run', 'Whole run', null],
+]
+const RANGE_KEY = 'perf.range'
+const savedRange = () => {
+  try { const v = localStorage.getItem(RANGE_KEY); return RANGES.some(r => r[0] === v) ? v : '24h' } catch (e) { return '24h' }
+}
 
 // Inspector activity: [column, label]. Only columns present in the CSV are shown.
 const INSPECTORS = [
@@ -81,17 +91,32 @@ const RawCounters = ({ model }) => {
   )
 }
 
+/** Old servers answer /perf?since with the whole run as an array: cut it here. */
+const fromResponse = (res, since) => {
+  if (!Array.isArray(res)) return res
+  const [head, ...rows] = res
+  const t = l => Number(String(l).split(',')[0])
+  const first = rows.findIndex(l => t(l) >= since)
+  const keep = first === -1 ? [] : rows.slice(Math.max(0, first - 1))
+  return { lines: head ? [head, ...keep] : [], runStart: rows.length ? t(rows[0]) : null, runEnd: rows.length ? t(rows[rows.length - 1]) : null,
+    rows: keep.length, bucketed: false, anchor: first > 0, step: null }
+}
+
 function Perf() {
-  const [state, setState] = useState({ lines: null, error: null, loading: true, updated: null })
+  const [range, setRangeState] = useState(savedRange)
+  const [state, setState] = useState({ data: null, error: null, loading: true, updated: null, range: null })
   const timer = useRef(0)
+  const setRange = r => { setRangeState(r); try { localStorage.setItem(RANGE_KEY, r) } catch (e) { /* private mode */ } }
 
   const load = useRef(null)
   load.current = async () => {
     clearTimeout(timer.current)
     setState(s => ({ ...s, loading: true }))
+    const secs = RANGES.find(r => r[0] === range)[2]
+    const since = secs === null ? 0 : Math.floor(Date.now() / 1000) - secs
     try {
-      const lines = await getJson('/perf')
-      setState({ lines, error: null, loading: false, updated: Date.now() })
+      const res = await getJson(`/perf?since=${since}&points=${POINTS}`)
+      setState({ data: fromResponse(res, since), error: null, loading: false, updated: Date.now(), range })
     } catch (error) {
       setState(s => ({ ...s, error, loading: false }))
     }
@@ -100,21 +125,34 @@ function Perf() {
   useEffect(() => {
     load.current()
     return () => clearTimeout(timer.current)
-  }, [])
+  }, [range])
 
-  const m = useMemo(() => perfModel(state.lines), [state.lines])
+  const d = state.data
+  const m = useMemo(() => perfModel(d ? d.lines : null, { anchor: !!(d && d.anchor) }), [d])
 
-  if (!state.lines) return <Status error={state.error} text="Loading perf_monitor data…" />
-  if (m.n === 0) {
-    return <div className="ov"><Section title="Performance">
-      <div className="viz-empty">No perf_monitor samples for the current Snort run yet. perf_monitor writes a sample once
-        both its time (default 60 s) and packet (default 10,000) thresholds are reached.</div>
-    </Section></div>
+  const rangeLabel = RANGES.find(r => r[0] === range)[1]
+  const picker = <div className="seg" role="group" aria-label="Time range">
+    {RANGES.map(([id, label]) => <button key={id} type="button" className={range === id ? 'seg-on' : ''} onClick={() => setRange(id)}>{label}</button>)}
+  </div>
+
+  if (!d) return <Status error={state.error} text="Loading perf_monitor data…" />
+  const samples = m.n - (m.anchor ? 1 : 0)
+  if (samples <= 0) {
+    return <div className="ov">
+      <div className="ov-filters">{picker}</div>
+      <Section title="Performance">
+        <div className="viz-empty">{d.runEnd
+          ? <>No perf_monitor samples in the last {rangeLabel}. The newest sample of the current Snort run is from {fmtDay(d.runEnd)} {fmtClock(d.runEnd, false)} ({fmtSpan(Date.now() / 1000 - d.runEnd)} ago); pick a longer range.</>
+          : <>No perf_monitor samples for the current Snort run yet. perf_monitor writes a sample once
+            both its time (default 60 s) and packet (default 10,000) thresholds are reached.</>}</div>
+      </Section>
+    </div>
   }
 
   const t = m.t
   const now = Date.now() / 1000
   const last = t[m.n - 1]
+  const first = t[m.anchor ? 1 : 0]
   const age = now - last
   const has = c => m.has(c)
 
@@ -158,11 +196,13 @@ function Perf() {
   return (
     <div className={'ov' + (state.loading ? ' stale' : '')}>
       <div className="ov-filters">
-        <span className="muted">Current Snort run</span>
+        {picker}
         <span className="muted">
-          <strong className="hl">{fmtNum(m.n)}</strong> samples · {fmtDay(t[0])} {fmtClock(t[0], false)} – {fmtDay(last)} {fmtClock(last, false)}
-          {' '}({fmtSpan(last - t[0])})
+          <strong className="hl">{fmtNum(d.rows)}</strong> samples · {fmtDay(first)} {fmtClock(first, false)} – {fmtDay(last)} {fmtClock(last, false)}
+          {d.bucketed && <> · averaged per {fmtSpan(d.step)}</>}
         </span>
+        {d.runStart && <span className="muted" title="perf_monitor_base.csv starts a new header on every Snort start; only the current run is shown">
+          run since {fmtDay(d.runStart)} {fmtClock(d.runStart, false)} ({fmtSpan(last - d.runStart)})</span>}
         {age > STALE_S
           ? <span className="warn" title="perf_monitor writes only after both its time and packet thresholds are reached; Snort may be idle or stopped.">
               ⚠ last sample {fmtSpan(age)} ago
@@ -184,7 +224,7 @@ function Perf() {
         <Kpi label="Alerts" value={fmtCompact(m.total('detection.alerts'))}
              sub={`now ${fmtCompact(m.latestOf(alertsPerMin))}/min` + (alertLimit ? ` · ${fmtCompact(alertLimit)} over limit` : '')} />
         <Kpi label="Active flows" value={curFlows ? fmtNum(m.latest('stream.current_flows')) : '—'}
-             sub={curFlows ? `peak ${fmtNum(Math.max(...curFlows.filter(v => v !== null)))} in run` : 'not reported'} />
+             sub={curFlows ? `peak ${fmtNum(Math.max(...curFlows.filter(v => v !== null)))} in range` : 'not reported'} />
         <Kpi label="New flows" value={fmtCompact(m.total('stream.flows'))} sub={`now ${fmtCompact(m.latestOf(flowsPerMin))}/min`} />
       </div>
 
@@ -215,12 +255,12 @@ function Perf() {
       </div>
 
       <div className="perf-grid">
-        <Section title="Inspector activity" note="run totals">
+        <Section title="Inspector activity" note={range === 'run' ? 'totals, whole run' : `totals, last ${rangeLabel}`}>
           <BarList rows={inspectorRows} renderMeta={(k, r) => <span className="muted mono raw-name">{r.col}</span>}
                    empty="No inspector activity reported." />
         </Section>
-        <Section title="Traffic anomalies & capture health" note="run total · sparkline = rate per minute over the run">
-          {healthHit.length === 0 && <div className="viz-empty">None of the tracked anomaly counters moved in this run.</div>}
+        <Section title="Traffic anomalies & capture health" note={`total in range · sparkline = rate per minute`}>
+          {healthHit.length === 0 && <div className="viz-empty">None of the tracked anomaly counters moved in this range.</div>}
           <div className="health">
             {healthHit.map(([c, label]) =>
               <div key={c} className="health-row" title={c}>
@@ -230,7 +270,7 @@ function Perf() {
               </div>)}
           </div>
           {healthZero.length > 0 &&
-            <div className="card-note">Zero in this run: {healthZero.map(([, l]) => l).join(', ')}</div>}
+            <div className="card-note">Zero in this range: {healthZero.map(([, l]) => l).join(', ')}</div>}
         </Section>
       </div>
 
