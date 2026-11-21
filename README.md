@@ -141,7 +141,7 @@ cd server && npm test   # tool output parsers
 ## Screenshots
 
 The overview view
-![overview](/screenshots/h.png)
+![overview](/screenshots/k.png)
 The Network view shows the current network connections
 ![network view](/screenshots/j.png)
 The alert view shows the latest alerts
