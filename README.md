@@ -143,7 +143,7 @@ cd server && npm test   # tool output parsers
 The overview view
 ![overview](/screenshots/k.png)
 The Network view shows the current network connections
-![network view](/screenshots/j.png)
+![network view](/screenshots/l.png)
 The alert view shows the latest alerts
 ![alert view](/screenshots/a.png)
 The AppID view is updated over a socket connection

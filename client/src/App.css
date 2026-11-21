@@ -520,7 +520,7 @@ html, body { background: var(--bg); }
 
 /* =================== Network =================== */
 .net-check { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text); cursor: pointer; white-space: nowrap; }
-.net-main { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 10px; align-items: start; }
+.net-main { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 10px; align-items: stretch; }
 .net-card { padding-bottom: 8px; }
 .net-graph {
   position: relative; width: 100%; overflow: hidden; border-radius: 4px; touch-action: none;
@@ -558,7 +558,11 @@ html, body { background: var(--bg); }
 .sw-hub { border-radius: 2px; transform: rotate(45deg); width: 8px; height: 8px; background: var(--surface-2); border: 1.2px solid var(--muted); }
 .dot-sw { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; flex-shrink: 0; }
 
-.net-side { position: sticky; top: 52px; max-height: calc(100vh - 64px); overflow-y: auto; }
+.net-side {
+  /* as tall as the connection map: the panel's own content does not size the row, it scrolls */
+  contain: size; display: flex; flex-direction: column; min-height: 0;
+}
+.net-side > .nd { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding-right: 4px; margin-right: -4px; }
 .nd { font-size: 12px; }
 .nd-empty p { color: var(--muted); margin: 4px 0; line-height: 1.5; }
 .nd-head { display: flex; align-items: center; gap: 4px; margin-bottom: 4px; }
@@ -590,7 +594,8 @@ html, body { background: var(--bg); }
 .net-listen { max-height: 520px; overflow-y: auto; }
 @media (max-width: 1200px) {
   .net-main, .net-tables { grid-template-columns: minmax(0, 1fr); }
-  .net-side { position: static; max-height: none; }
+  .net-side { contain: none; }
+  .net-side > .nd { overflow-y: visible; }
 }
 .net-sev { display: inline-flex; gap: 8px; white-space: nowrap; align-items: center; }
 .net-listen td:nth-child(2) { white-space: normal; overflow-wrap: anywhere; }

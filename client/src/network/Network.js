@@ -295,6 +295,10 @@ const Signals = ({ n, win }) => (
 
 const Details = ({ n, info, source, results, run, onClose, hist, win }) => {
   const [rdns, setRdns] = useState({})
+  // the panel scrolls on its own; start a newly selected host from the top
+  const boxRef = useRef(null)
+  const ip = n ? n.ip : null
+  useEffect(() => { if (boxRef.current) boxRef.current.scrollTop = 0 }, [ip])
   useEffect(() => {
     if (!n) return
     n.addrs.filter(ip => !(ip in rdns)).slice(0, 4).forEach(ip => {
@@ -315,7 +319,7 @@ const Details = ({ n, info, source, results, run, onClose, hist, win }) => {
   const names = [...new Set([...n.names, ...n.addrs.flatMap(ip => rdns[ip] || [])])]
   const sigs = n.sigs
   return (
-    <div className="nd">
+    <div className="nd" ref={boxRef}>
       <div className="nd-head">
         <span className="dot-sw" style={{ background: nodeColor(n) }} />
         <h4 className="mono">{n.ip}</h4>
