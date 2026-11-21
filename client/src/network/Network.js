@@ -365,7 +365,7 @@ const Details = ({ n, info, source, results, run, onClose, hist, win }) => {
         <ul className="nd-alerts">{sigs.slice(0, 6).map(g => <li key={g.msg}>
           <PriorityBadge p={g.priority} /> {g.msg} <span className="muted">×{fmtNum(g.count)} · last {fmtClock(g.last)}</span>
         </li>)}</ul>
-        {n.sigCount > 6 && <div className="card-note">and {n.sigCount - 6} more signatures; see Overview or Search.</div>}
+        {n.sigCount > 6 && <div className="card-note">and {n.sigCount - 6} more signatures; see Overview or Alerts.</div>}
       </>}
 
       {(n.appSessions > 0) && <>

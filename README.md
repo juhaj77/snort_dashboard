@@ -72,13 +72,34 @@ The view at the top of this page:
 
 Details and setup: [NETWORK.md](NETWORK.md).
 
-### Alerts: the live feed
+### Alerts: which alerts are out of the ordinary
 
-![Alerts tab: the newest Snort alerts with priority badges, rule, protocol, source, destination, message and classification](/screenshots/a.png)
+![Alerts tab: unusual bursts as cards, a rule map of every rule over time coloured by how far it is from its own normal level, and the live alert feed](/screenshots/n.png)
 
-The newest alerts, refreshed every 5 seconds. Click a row for every field and a Wireshark filter
-built from the packet timestamp. While an alert's details are open the feed pauses, so the row
-doesn't jump away; a counter shows how many new alerts are waiting.
+Every rule is compared with **its own normal level** in the window (1 h, 6 h or 24 h). A rule
+that floods steadily stays calm. A sudden burst stands out, and so does a rule that is normally
+silent.
+
+- **Unusual bursts.** The most unusual periods first, each with its count against the rule's usual
+  level (for example *752 alerts · ×15 the usual ~49*), the main source → destination, and a
+  **new** tag when the rule had not fired earlier in the window. A P1 or P2 rule that is otherwise
+  silent ranks high even with a single alert.
+- **Rule map.** One row per rule and one column per time slice (1, 5 or 20 minutes). Gray means
+  the rule's normal activity. Purple grows stronger from 2 to 32 times its normal level, and
+  unusual cells are outlined. Hover a cell for its count and top sources.
+- **Alert list.** Click a burst or a cell to list exactly those alerts. The list also has:
+  - **Live**: the newest 100 alerts, refreshed every 5 seconds. While an alert's details are open
+    the feed pauses so the row doesn't jump away, and a counter shows how many new alerts are
+    waiting.
+  - **History search**: load the latest N alerts and narrow them down by time range. Sort by any
+    column, or put the **rarest** rules first.
+
+A text filter (include or exclude, matching message, classification, rule or address) works in
+every list. Click a row for every field and a ready-made **Wireshark filter** built from the
+packet timestamp.
+
+Counting happens on the server, so the browser receives a small summary even for 24 hours of
+alerts on a busy network.
 
 ### AppID: what applications are on the wire
 
@@ -99,17 +120,6 @@ Every session Snort's application identification sees, drawn so that repeating h
 Choose 15 min, 1 h or everything loaded. Recent sessions are shown as soon as the tab opens, and
 new ones appear the moment Snort writes them (pushed over socket.io, no polling). Unidentified
 services are highlighted.
-
-### Search: dig through alert history
-
-![Search tab: an alert expanded to all its fields with a Wireshark filter](/screenshots/c.png)
-
-Load the latest N alerts and narrow them down:
-
-- by time range, or by text (include or exclude)
-- sort by any column, or **rarest first** to bring unusual signatures to the top
-
-![Search tab: SSL, DNS spoof and local ICMP alerts over IPv4 and IPv6](/screenshots/d.png)
 
 ### Performance: is the sensor keeping up?
 
@@ -220,9 +230,11 @@ All endpoints return JSON. Log files are read from the end, so large logs don't 
 
 | Endpoint | Returns |
 |---|---|
-| `GET /alerts` | the newest 38 alerts |
+| `GET /alerts` | the newest 100 alerts |
 | `GET /alerts_all/:amount` | the newest `amount` alerts (max 200,000) |
 | `GET /alerts_all/:amount?since=<epoch s>` | alerts with `seconds >= since`, at most the newest `amount` |
+| `GET /alerts_all/:amount?since=<s>&until=<s>&rule=<gid:sid:rev>` | alerts in `[since, until]`, optionally of one rule, at most the newest `amount` |
+| `GET /alerts_stats?since=<s>&until=<s>&step=<s>` | alert counts per rule and time slice of `step` seconds (max 7 days, 500 slices), with the top sources and destinations of each slice |
 | `GET /appid/:amount` | the newest `amount` AppID events from `appid.json` |
 | `GET /perf` | `perf_monitor_base.csv` rows of the current Snort run, header first |
 | `GET /perf?since=<epoch s>&points=<n>` | rows of the current run from `since` (`0` = whole run), folded into at most `n` (default 600) samples: counters summed, gauges newest; with run start and end |

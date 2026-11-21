@@ -9,6 +9,7 @@ var http = require('http')
 var Tail = require('tail').Tail;
 var alertsRouter = require('./routes/alerts');
 var alertsAllRouter = require('./routes/alertsAll');
+var alertStatsRouter = require('./routes/alertStats');
 var perfRouter = require('./routes/perf');
 var appidRouter = require('./routes/appid');
 var networkRouter = require('./routes/network');
@@ -46,6 +47,7 @@ tail.on('error', error => console.log(error))
 
 app.use("/alerts", alertsRouter);
 app.use("/alerts_all", alertsAllRouter);
+app.use("/alerts_stats", alertStatsRouter);
 app.use('/perf',perfRouter)
 app.use('/appid', appidRouter)
 app.use('/network', networkRouter)

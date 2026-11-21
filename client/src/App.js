@@ -1,8 +1,7 @@
 import React, { useState } from 'react'
 import './App.css';
-import Alerts from './Alerts';
+import AlertsTab from './alerts/AlertsTab';
 import AppIds from './AppIds';
-import Search from './Search';
 import Perf from './Perf';
 import Overview from './overview/Overview';
 import Network from './network/Network';
@@ -10,9 +9,8 @@ import Network from './network/Network';
 const TABS = [
   ['OVERVIEW', 'Overview', Overview],
   ['NETWORK', 'Network', Network],
-  ['ALERTS', 'Alerts', Alerts],
+  ['ALERTS', 'Alerts', AlertsTab],
   ['APPID', 'AppID', AppIds],
-  ['SEARCH', 'Search', Search],
   ['PERF', 'Performance', Perf],
 ]
 

@@ -24,7 +24,7 @@ test('renders the tabs with Overview first', async () => {
   render(<App />);
   await screen.findByText('Top sources');
   const tabs = screen.getAllByRole('button').filter(b => b.className.includes('tab')).map(b => b.textContent);
-  expect(tabs).toEqual(['Overview', 'Network', 'Alerts', 'AppID', 'Search', 'Performance']);
+  expect(tabs).toEqual(['Overview', 'Network', 'Alerts', 'AppID', 'Performance']);
 });
 
 test('overview summarises alerts, skips malformed records and shows event details', async () => {
@@ -170,7 +170,8 @@ test('Performance range picker asks the server for that range', async () => {
 test('Alerts pause while details are open and catch up when closed', async () => {
   jest.useFakeTimers();
   let batch = [alert(1)];
-  global.fetch = jest.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([...batch]) }));
+  global.fetch = jest.fn(url => Promise.resolve({ ok: true, json: () => Promise.resolve(
+    url.includes('/alerts_stats') ? { since: 0, until: 3600, step: 300, bins: 12, total: 0, rules: [] } : [...batch]) }));
   const { unmount } = render(<App />);
   await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Alerts' })); });
   const row = (await screen.findByText(alert(1).timestamp)).closest('tr');
@@ -187,3 +188,63 @@ test('Alerts pause while details are open and catch up when closed', async () =>
   unmount();
   jest.useRealTimers();
 });
+
+test('Alerts tab ranks an unusual burst and lists its alerts on click', async () => {
+  const now = Math.floor(Date.now() / 1000)
+  const since = now - 72 * 300
+  const flat = Array(72).fill(400)                       // steady flood: normal
+  const burst = Array(72).fill(0); burst[60] = 25        // normally silent rule fires 25 times
+  const stats = { since, until: since + 72 * 300, step: 300, bins: 72, total: 72 * 400 + 25, rules: [
+    { rule: '116:414:1', msg: 'broadcast flood', priority: 3, cls: null, total: 72 * 400, counts: flat, cells: {} },
+    { rule: '122:23:1', msg: 'UDP filtered portsweep', priority: 3, cls: null, total: 25, counts: burst,
+      cells: { 60: { src: [['10.0.0.66', 25]], dst: [['10.0.0.1', 25]] } } },
+  ] }
+  const burstAlerts = [alert(5, { rule: '122:23:1', msg: 'UDP filtered portsweep', src_ap: '10.0.0.66:1' })]
+  global.fetch = jest.fn(url => Promise.resolve({ ok: true, json: () => Promise.resolve(
+    url.includes('/alerts_stats') ? stats : url.includes('rule=') ? burstAlerts : [alert(1)]) }))
+  render(<App />)
+  fireEvent.click(screen.getByRole('button', { name: 'Alerts' }))
+  const card = (await screen.findByText('UDP filtered portsweep')).closest('button')
+  expect(card).toHaveTextContent('25 alerts')
+  expect(card).toHaveTextContent('10.0.0.66 → 10.0.0.1')
+  expect(screen.queryByText('broadcast flood', { selector: '.episode-msg' })).toBeNull() // steady noise is not a burst
+  fireEvent.click(card)
+  expect(await screen.findByText('10.0.0.66:1')).toBeInTheDocument()
+  const url = global.fetch.mock.calls.map(c => c[0]).find(u => u.includes('rule='))
+  expect(url).toContain('rule=122%3A23%3A1')
+  expect(Number(new URL(url).searchParams.get('since'))).toBe(since + 60 * 300)
+
+  // clicking the selected burst again clears it and brings the live feed back
+  fireEvent.click(card)
+  expect(await screen.findByText(alert(1).src_ap)).toBeInTheDocument()
+  expect(screen.queryByRole('tab', { name: 'Selected burst' })).toBeNull()
+  expect(card).not.toHaveClass('episode-on')
+
+  // the Live tab and Esc also leave the selection
+  fireEvent.click(card)
+  expect(await screen.findByRole('tab', { name: 'Selected burst' })).toBeInTheDocument()
+  fireEvent.click(screen.getByRole('tab', { name: 'Live' }))
+  expect(screen.queryByRole('tab', { name: 'Selected burst' })).toBeNull()
+  expect(await screen.findByText(alert(1).src_ap)).toBeInTheDocument()
+  fireEvent.click(card)
+  expect(await screen.findByRole('tab', { name: 'Selected burst' })).toBeInTheDocument()
+  fireEvent.keyDown(window, { key: 'Escape' })
+  expect(screen.queryByRole('tab', { name: 'Selected burst' })).toBeNull()
+  expect(card).not.toHaveClass('episode-on')
+  expect(await screen.findByText(alert(1).src_ap)).toBeInTheDocument()
+})
+
+test('Alerts history search filters loaded alerts by text', async () => {
+  global.fetch = jest.fn(url => Promise.resolve({ ok: true, json: () => Promise.resolve(
+    url.includes('/alerts_stats') ? { since: 0, until: 3600, step: 300, bins: 12, total: 0, rules: [] }
+      : Array.from({ length: 6 }, (_, i) => alert(i))) }))
+  render(<App />)
+  fireEvent.click(screen.getByRole('button', { name: 'Alerts' }))
+  fireEvent.click(await screen.findByRole('tab', { name: 'History search' }))
+  expect(await screen.findByText('6 of 6 alerts')).toBeInTheDocument()
+  fireEvent.change(screen.getByPlaceholderText(/contains/), { target: { value: 'BAD' } })
+  expect(screen.getByText('3 of 6 alerts')).toBeInTheDocument()
+  fireEvent.change(screen.getByLabelText('Filter mode'), { target: { value: 'exclude' } })
+  expect(screen.getByText('3 of 6 alerts')).toBeInTheDocument()
+  expect(screen.getAllByText('low thing').length).toBe(3)
+})
