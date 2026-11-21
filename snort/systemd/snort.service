@@ -1,5 +1,5 @@
 [Unit]
-Description=Snort 3 IDS listening on snort0 (snort_log_view)
+Description=Snort 3 IDS listening on snort0 (snort_dashboard)
 Requires=snort0-iface.service
 After=snort0-iface.service
 

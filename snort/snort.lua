@@ -30,7 +30,7 @@ EXTERNAL_NET = 'any'
 include 'snort_defaults.lua'
 
 ---------------------------------------------------------------------------
--- snort_log_view: packet source (see ENVIRONMENT.md)
+-- snort_dashboard: packet source (see ENVIRONMENT.md)
 ---------------------------------------------------------------------------
 -- Windows traffic is captured with Npcap/dumpcap.exe and written into the
 -- dummy interface snort0 by pcap2iface.py. Snort reads it as a live interface.

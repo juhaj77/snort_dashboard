@@ -1,5 +1,5 @@
 [Unit]
-Description=Dummy interface snort0 for Windows capture forwarding (snort_log_view)
+Description=Dummy interface snort0 for Windows capture forwarding (snort_dashboard)
 Before=network.target snort.service
 
 [Service]

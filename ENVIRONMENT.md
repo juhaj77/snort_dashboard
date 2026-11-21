@@ -1,7 +1,7 @@
 # Environment: Snort 3 in WSL2, analysing Windows traffic
 
 This guide sets up a Windows 11 + WSL2 machine so that **Snort 3 running in WSL analyses the
-Windows host's network traffic** from a **live interface (`-i`)**, and `snort_log_view` shows
+Windows host's network traffic** from a **live interface (`-i`)**, and `snort_dashboard` shows
 the results. Snort is started once and keeps running. It does not re-read capture files
 chunk by chunk.
 
@@ -18,11 +18,11 @@ Each command is marked with where it runs:
 
 ## 1. Why the traffic has to be forwarded
 
-* WSL2 runs here with `networkingMode=mirrored` (`%USERPROFILE%\.wslconfig`). WSL's `eth0`
+* This guide uses WSL2 with `networkingMode=mirrored` (`%USERPROFILE%\.wslconfig`). WSL's `eth0`
   mirrors the Windows IP address, but **only WSL's own traffic** passes through the Linux
   kernel. Browser and other Windows traffic never shows up there, so `snort -i eth0` cannot
   see it.
-* Snort 3 reads packets through a DAQ module. In this install (`snort --daq-list`):
+* Snort 3 reads packets through a DAQ module. A standard build offers (`snort --daq-list`):
   * `pcap`: *readback live multi*, reads a live interface (`-i`) or a file (`-r`)
   * `afpacket`: *live inline*, Linux live interface
   * `savefile`: files only
@@ -46,7 +46,7 @@ Each command is marked with where it runs:
                                           │                            ▼             │
                                           │        /var/log/snort/*.txt|json|csv     │
                                           │                            ▼             │
-                                          │            snort_log_view (node)         │
+                                          │            snort_dashboard (node)        │
                                           └──────────────────────────────────────────┘
 ```
 
@@ -55,12 +55,12 @@ as received traffic. Packet sockets listening on the interface still see the tra
 frames, and Snort's pcap DAQ is one of them. Nothing leaks back onto the network, so no loop
 can form.
 
-> **Tested on 2026-11-19:** Windows `Ethernet` → `dumpcap.exe` → `pcap2iface.py` → virtual
+> **Verified:** Windows `Ethernet` → `dumpcap.exe` → `pcap2iface.py` → virtual
 > interface → Snort with `daq.inputs` from `snort.lua`. Snort received 272 packets and raised
 > 53 alerts from real traffic, with nothing on the command line except `-c`, `-l` and
 > `--plugin-path`. The test ran without sudo inside a user namespace, so it used a `veth`
 > interface named `snort0` instead of `dummy`, because loading the `dummy` module needs root.
-> The mechanism is the same. Use section 8 to check the `dummy` version on your machine.
+> The mechanism is the same. Use section 8 to check the `dummy` setup on your own machine.
 
 ---
 
@@ -79,7 +79,7 @@ can form.
 
 ## 3. Prerequisites
 
-| Component | Checked version / state |
+| Component | Tested version / required state |
 |---|---|
 | Snort | 3.13.2.0, DAQ 3.0.29, libpcap 1.10.6, `/usr/local/bin/snort` |
 | snort3_extra | `appid_listener` at `/usr/local/lib/snort/plugins/extra/inspectors/appid_listener.so` |
@@ -106,16 +106,16 @@ to Administrators only".
 ```bash
 "/mnt/c/Program Files/Wireshark/dumpcap.exe" -D
 ```
-Example output on this machine:
+Example output:
 ```
 4. \Device\NPF_{63E6...} (Ethernet 2)
 5. \Device\NPF_{9A67...} (Ethernet)
 6. \Device\NPF_{5B2C...} (vEthernet (WSL (Hyper-V firewall)))
 7. \Device\NPF_Loopback (Adapter for loopback traffic capture)
 ```
-Use the adapter that connects the machine to the network. On this machine that is
-**`Ethernet`**. Pass it by name (`-i Ethernet`) rather than by number, because the numbers can
-change.
+Use the adapter that connects the machine to the network, usually **`Ethernet`** or **`Wi-Fi`**.
+Pass it by name (`-i Ethernet`) rather than by number, because the numbers can change. The
+examples in this guide use `Ethernet`; replace it with your adapter's name.
 
 Do not use:
 * `NPF_Loopback`: its link type is not Ethernet, and the forwarder rejects it.
@@ -132,16 +132,16 @@ The active Snort config lives in this repository as `snort/snort.lua`, and
 project. Snort resolves `include 'snort_defaults.lua'` relative to the path given with `-c`,
 which is the symlink's directory, so the other files stay in `/usr/local/etc/snort/`.
 
-**[WSL]** (already done on this machine; `/usr/local/etc/snort` is owned by the user, so no sudo needed)
+**[WSL]**, in the root of your clone of this repository:
 ```bash
-cd ~/projects/snort_log_view
-cp -p /usr/local/etc/snort/snort.lua /usr/local/etc/snort/snort.lua.orig   # backup
-ln -sf "$PWD/snort/snort.lua" /usr/local/etc/snort/snort.lua
+sudo cp -p /usr/local/etc/snort/snort.lua /usr/local/etc/snort/snort.lua.orig   # backup
+sudo ln -sf "$PWD/snort/snort.lua" /usr/local/etc/snort/snort.lua
 ls -l /usr/local/etc/snort/snort.lua
 ```
-Undo: `mv /usr/local/etc/snort/snort.lua.orig /usr/local/etc/snort/snort.lua`
+Undo: `sudo mv /usr/local/etc/snort/snort.lua.orig /usr/local/etc/snort/snort.lua`
 
-If `/usr/local/etc/snort` is owned by root on your machine, prefix the commands with `sudo`.
+If `/usr/local/etc/snort` is owned by your own user, `sudo` is not needed. The clone must stay
+where it is, because the symlink points into it.
 The rules files referenced by the config (`/usr/local/etc/snort/rules/snort3-community.rules`,
 `local.rules`) are not part of this repository.
 
@@ -212,9 +212,8 @@ is only a permission message, and it disappears when Snort runs as root.
 
 ## 6. Install the helpers
 
-**[WSL]**
+**[WSL]**, in the repository root:
 ```bash
-cd ~/projects/snort_log_view
 sudo install -m 755 snort/pcap2iface.py   /usr/local/bin/pcap2iface.py
 sudo install -m 755 snort/snort-forward.sh /usr/local/bin/snort-forward.sh
 sudo install -m 644 snort/systemd/snort0-iface.service /etc/systemd/system/
@@ -307,8 +306,8 @@ The pieces and what keeps each one alive:
 
 | Piece | Survives reboot via |
 |---|---|
-| WSL mirrored networking | `%USERPROFILE%\.wslconfig` (already set) |
-| systemd in WSL | `/etc/wsl.conf` → `[boot] systemd=true` (already set) |
+| WSL mirrored networking | `%USERPROFILE%\.wslconfig` (section 3) |
+| systemd in WSL | `/etc/wsl.conf` → `[boot] systemd=true` (section 3) |
 | `snort0` interface | `snort0-iface.service` (systemd) |
 | Snort | `snort.service` (systemd) |
 | Forwarder | `snort-forward.service` (systemd), also after a WSL restart |
@@ -325,17 +324,16 @@ journalctl -u snort -f            # Snort output
 journalctl -u snort-forward -f    # forwarder / dumpcap output
 ```
 
-**Why the forwarder is a systemd service.** Until 2026-11-21 the forwarder was started only by
-the Windows logon task (9.2). When the WSL VM stopped and started again in the middle of a
-session (`wsl --shutdown`, Windows sleep or update, WSL crash), systemd brought back `snort0`
-and Snort, but nothing started the forwarder: Snort ran on an interface that received no
-packets, and the dashboard looked broken (see "After a WSL restart" in section 10). The
-service starts the forwarder at every WSL boot.
+**Why the forwarder is a systemd service.** The WSL VM can stop and start again in the
+middle of a session (`wsl --shutdown`, Windows sleep or update, a WSL crash). systemd then
+brings back `snort0` and Snort, but a forwarder started only by the Windows logon task (9.2)
+does not come back: Snort runs on an interface that receives no packets, and the dashboard
+looks broken (see "After a WSL restart" in section 10). The service starts the forwarder at
+every WSL boot.
 
 It works because systemd services can start Windows programs through WSL interop. Services do
-not get the `WSL_INTEROP` variable, but WSL falls back to `/run/WSL/1_interop`. Tested on
-2026-11-21: `dumpcap.exe -D` and a 20-packet capture on `Ethernet`, both started from a
-systemd unit. `dumpcap.exe` has to be allowed to capture without elevation (section 3); a
+not get the `WSL_INTEROP` variable, but WSL falls back to `/run/WSL/1_interop`. Verified with
+`dumpcap.exe -D` and a short capture, both started from a systemd unit. `dumpcap.exe` has to be allowed to capture without elevation (section 3); a
 service cannot answer a UAC prompt.
 
 **Settings.** Put overrides in `/etc/default/snort-forward`, one `VAR=value` per line, then
@@ -378,7 +376,7 @@ Start-ScheduledTask -TaskName "snort-forward"
 * To change the adapter, pass the variable through: `--exec /usr/bin/env WIN_IFACE=Wi-Fi /usr/local/bin/snort-forward.sh`.
 * Remove the task: `Unregister-ScheduledTask -TaskName "snort-forward" -Confirm:$false`.
 
-> The Task Scheduler setup has **not** been tested on this machine yet. The forwarding
+> The Task Scheduler setup itself has **not** been tested end to end yet. The forwarding
 > command it runs has been tested.
 >
 > The task only runs at logon. If WSL stops later in the session, the task's `wsl.exe` ends
@@ -434,7 +432,7 @@ journalctl -u snort-forward -n 20 --no-pager             # dumpcap errors (adapt
 ```
 With `snort-forward.service` enabled (9.1) the forwarder comes back by itself. Without it,
 start it by hand: `sudo /usr/local/bin/snort-forward.sh` (or `Start-ScheduledTask -TaskName
-"snort-forward"` on Windows). The snort_log_view server and client also stopped with WSL;
+"snort-forward"` on Windows). The snort_dashboard server and client also stop with WSL;
 start them again (section 11.3).
 
 **Other notes:**
@@ -451,12 +449,12 @@ start them again (section 11.3).
 
 ---
 
-## 11. Node.js environment for snort_log_view
+## 11. Node.js environment for snort_dashboard
 
 ### 11.1 Node.js in WSL (nvm)
 
-WSL must use its own Node. On this machine the `npm` on the PATH was originally Windows' npm
-(`/mnt/c/Program Files/nodejs/npm`), and there was no `node` at all, which breaks installs.
+WSL must use its own Node. If Node.js is installed on Windows, WSL's PATH can contain Windows'
+`npm` (`/mnt/c/Program Files/nodejs/npm`) without a Linux `node`, which breaks installs.
 
 **[WSL]**
 ```bash
@@ -476,21 +474,13 @@ appendWindowsPath = false
 
 ### 11.2 Install dependencies
 
-**[WSL]**
+**[WSL]**, in the repository root:
 ```bash
-cd ~/projects/snort_log_view/server && npm install
+cd server && npm install
 cd ../client && npm install
 ```
 
-Dependency changes made for Node 22:
-
-| Where | Change | Why |
-|---|---|---|
-| `server/package.json` | removed `pcap` and `pcap-parser` | `pcap` (node_pcap 3.1.0) is a native addon whose `nan` build fails against Node 22's V8 API (`SetAccessor`). Neither package is required anywhere in the code |
-| `server/package-lock.json` | `npm audit fix` | 23 → 7 advisories, semver-compatible updates only |
-| `client/package-lock.json` | `npm audit fix` | 76 → 32 advisories, semver-compatible updates only. Build and dev server were re-tested afterwards |
-
-Remaining advisories need breaking upgrades and were left as they are:
+`npm audit` still reports advisories that need breaking upgrades:
 * **server:** `jade` (deprecated, successor `pug`) with `constantinople` and `transformers`,
   and `morgan` / `on-headers`.
 * **client:** `react-scripts` 5 (Create React App, unmaintained) and its toolchain. These
@@ -501,15 +491,15 @@ Remaining advisories need breaking upgrades and were left as they are:
 `/var/log/snort/alert_json.txt` is `-rw------- root`, which is why the server is started with
 `sudo`. With nvm, `sudo` does not find `node`, so pass the PATH through:
 
-**Server (terminal 3).** [WSL]
+**Server (terminal 3).** [WSL], in the repository root:
 ```bash
-cd ~/projects/snort_log_view/server
+cd server
 sudo env "PATH=$PATH" npm start
 ```
 
-**Client (terminal 4).** [WSL]
+**Client (terminal 4).** [WSL], in the repository root:
 ```bash
-cd ~/projects/snort_log_view/client
+cd client
 npm start
 ```
 Thanks to mirrored networking, open `http://localhost:3000` in a Windows browser.

@@ -1,5 +1,5 @@
 [Unit]
-Description=Forward the Windows capture (dumpcap.exe) to snort0 (snort_log_view)
+Description=Forward the Windows capture (dumpcap.exe) to snort0 (snort_dashboard)
 Requires=snort0-iface.service
 After=snort0-iface.service
 Before=snort.service

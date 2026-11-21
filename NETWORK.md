@@ -202,10 +202,10 @@ The map shows them as **one host** when they belong together:
 
 - they have the same MAC address in the neighbour tables (`arp`, `ip neigh`, `netsh`), or
 - an IPv6 address has the MAC address built into it (EUI-64: `…:xxff:fexx:…`, as in
-  `fe80::6c14:8aff:feb2:d281` → MAC `6e:14:8a:b2:d2:81`).
+  `fe80::211:22ff:fe33:4455` → MAC `00:11:22:33:44:55`).
 
 The host is named by its IPv4 address. The panel lists all addresses and all names (for
-example `dna.wlan`, `dna6.wlan`), and the alert and AppID counts are summed over the addresses.
+example `router.lan`, `router6.lan`), and the alert and AppID counts are summed over the addresses.
 A router is marked as the gateway even when only its IPv6 address is talking. Phones often use
 a random ("private") MAC address per network. That still works, because the IPv4 and IPv6
 addresses share the same random MAC.
