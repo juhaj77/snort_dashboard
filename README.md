@@ -82,12 +82,23 @@ doesn't jump away; a counter shows how many new alerts are waiting.
 
 ### AppID: what applications are on the wire
 
-![AppID tab: application sessions with client and service addresses and ports, DNS host and TLS host names, unknown services highlighted](/screenshots/b.png)
+![AppID tab: domain map of hosts as bubbles grouped by domain, host rhythm timeline with one tick per session and steady rhythms marked, and the latest events with repeat counters](/screenshots/m.png)
 
-Every session Snort's application identification sees: client and service, addresses and ports,
-and the DNS and TLS server names behind them. Recent sessions are shown as soon as the tab opens,
-and new ones appear the moment Snort writes them (pushed over socket.io, no polling).
-Unidentified services are highlighted.
+Every session Snort's application identification sees, drawn so that repeating hosts stand out:
+
+- **Domain map.** One bubble per host (TLS SNI, HTTP Host or DNS name), sized by its number of
+  sessions and packed into one cluster per domain. Unnamed addresses join the domain seen on the
+  same network, or the *local network* group. Hosts that just had a session pulse.
+- **Host rhythm.** The busiest hosts, one tick per session on a shared time axis, coloured by
+  DNS lookup, TLS or other. A host that keeps coming back draws a long dotted line; a steady
+  rhythm (polling, keep-alives, beacons) is detected, marked with ↻ and its period, and gets a
+  turning orbit in the map.
+- **Latest events.** The raw sessions, each with its host and a ×N counter of how often that
+  host appears in the window. Click a host anywhere to focus all three on it.
+
+Choose 15 min, 1 h or everything loaded. Recent sessions are shown as soon as the tab opens, and
+new ones appear the moment Snort writes them (pushed over socket.io, no polling). Unidentified
+services are highlighted.
 
 ### Search: dig through alert history
 

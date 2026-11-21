@@ -62,10 +62,34 @@ test('AppID tab shows existing events immediately instead of waiting for live da
   }));
   render(<App />);
   fireEvent.click(screen.getByRole('button', { name: 'AppID' }));
-  expect(await screen.findByText('host2.example')).toBeInTheDocument();
-  expect(screen.getByText('host1.example')).toBeInTheDocument();
-  const hosts = screen.getAllByText(/host\d\.example/).map(e => e.textContent);
-  expect(hosts).toEqual(['host2.example', 'host1.example']); // newest first
+  expect((await screen.findAllByText('host2.example')).length).toBeGreaterThan(0);
+  const rows = [...document.querySelectorAll('tbody tr.row')];
+  const tlsHosts = rows.map(r => r.lastElementChild.textContent);
+  expect(tlsHosts).toEqual(['host2.example', 'host1.example']); // newest first
+  // each row names its host; a single session has no repeat counter
+  expect(rows[0].querySelector('.seen-host').textContent).toBe('host2.example');
+  expect(rows[0].querySelector('.seen-n')).toBeNull();
+});
+
+test('AppID list marks repeated hosts and focuses one on click', async () => {
+  const ev = (n, host) => ({
+    session_num: `0.${n}`, pkt_time: `2026-11-19 18:16:0${n}.000001`, pkt_num: n, proto: 'TCP',
+    apps: { service: null, client: null, payload: null },
+    client_info: { ip: '192.168.1.5', port: 50000 + n }, service_info: { ip: '1.1.1.1', port: 443 },
+    dns_host: null, tls_host: host,
+  });
+  global.fetch = jest.fn(url => Promise.resolve({
+    ok: true,
+    json: () => Promise.resolve(url.includes('/appid/') ? [ev(1, 'a.example'), ev(2, 'b.example'), ev(3, 'a.example')] : []),
+  }));
+  render(<App />);
+  fireEvent.click(screen.getByRole('button', { name: 'AppID' }));
+  fireEvent.click(await screen.findByRole('tab', { name: 'All loaded' }));
+  const chips = await screen.findAllByText('×2');
+  expect(chips).toHaveLength(2);
+  fireEvent.click(chips[0]);
+  expect(document.querySelectorAll('tbody tr.row')).toHaveLength(2);
+  expect(screen.getByText('Latest events · a.example')).toBeInTheDocument();
 });
 
 test('Performance tab summarises perf_monitor data', async () => {
