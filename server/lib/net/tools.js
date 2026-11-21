@@ -15,6 +15,10 @@ const WIN_PROGRAMS = IS_WIN
   ? [process.env.ProgramFiles || 'C:\\Program Files', process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)']
   : ['/mnt/c/Program Files', '/mnt/c/Program Files (x86)']
 
+// WSL prints this when it cannot start a Windows program (interop broken until `wsl --shutdown`)
+const INTEROP_FAIL = /UtilAcceptVsock|accept4 failed/i
+const INTEROP_HINT = 'WSL could not start Windows programs (interop error). Run `wsl --shutdown` in Windows and start WSL again.'
+
 const exists = p => { try { fs.accessSync(p, fs.constants.X_OK); return true } catch (e) { return false } }
 
 /** Binary on PATH (Linux side) or null */
@@ -106,6 +110,7 @@ const snapshot = async source => {
       w.arp ? run(w.arp, ['-a']) : null, w.hostname ? run(w.hostname, []) : null, winAddrs(w),
       w.netsh ? run(w.netsh, ['interface', 'ipv6', 'show', 'neighbors']).catch(() => null) : null,
     ])
+    if (!ns.stdout.trim() && INTEROP_FAIL.test(ns.stderr)) throw new Error(INTEROP_HINT)
     raw = P.parseNetstatWin(ns.stdout)
     const procs = tl ? P.parseTasklist(tl.stdout) : new Map()
     // pid 0 owns sockets that are closing (TIME_WAIT); no process is behind them any more
@@ -160,7 +165,18 @@ const trace = async (source, ip) => {
   if (!cmd) return { tool: null, hops: [], error: 'No traceroute tool found. See NETWORK.md for installing traceroute.' }
   const r = await run(cmd[0], cmd[1], 90000)
   const hops = P.parseTrace(r.stdout)
-  return { tool: cmd[2], hops, error: hops.length ? null : (r.stderr.trim() || (r.err && r.err.message) || 'no hops') }
+  if (hops.length) return { tool: cmd[2], hops, error: null }
+  const msg = r.stderr.trim() || (r.err && r.err.message) || 'no hops'
+  const interop = INTEROP_FAIL.test(msg)
+  // tracert.exe failed to start from WSL: the Linux traceroute takes the same path out
+  const t = tools()
+  if (cmd[2] === 'tracert' && IS_WSL && t.linux && t.linux.traceroute) {
+    const alt = traceCmd('linux', ip)
+    const r2 = await run(alt[0], alt[1], 90000)
+    const hops2 = P.parseTrace(r2.stdout)
+    if (hops2.length) return { tool: alt[2], hops: hops2, error: null, note: interop ? 'tracert could not start (WSL interop error), used WSL traceroute instead' : 'tracert gave no hops, used WSL traceroute instead' }
+  }
+  return { tool: cmd[2], hops: [], error: interop ? INTEROP_HINT : msg }
 }
 
 const nmapBin = () => {

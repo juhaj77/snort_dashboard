@@ -225,6 +225,7 @@ const TraceResult = ({ r }) => {
           <span className="trace-ms">{avg !== null ? `${avg < 10 ? avg.toFixed(1) : Math.round(avg)} ms` : '—'}</span>
         </div>
       })}
+      {r.note && <div className="card-note">{r.note}</div>}
       <div className="card-note">{r.tool}: routers on the way, round-trip time per hop. "No reply" hops drop probes but still forward traffic.</div>
     </div>
   )
