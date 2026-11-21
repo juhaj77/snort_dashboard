@@ -165,7 +165,7 @@ Severity follows the Snort priority: **P1 high**, **P2 medium**, **P3 low**, **P
 
 - Snort 3 with `alert_json`, `perf_monitor` and `appid`, and `appid_listener` from snort3_extra
 - Node.js 18 or newer (tested with 22). On WSL, use a Linux Node such as nvm, not the Windows
-  one. See [ENVIRONMENT.md § 11](ENVIRONMENT.md#11-nodejs-environment-for-snort_log_view).
+  one. See [ENVIRONMENT.md § 11](ENVIRONMENT.md#11-nodejs-environment-for-snort_dashboard).
 - Optional, for the Network tab: nmap, traceroute and tshark (see [NETWORK.md](NETWORK.md))
 
 ## Snort configuration
@@ -209,6 +209,8 @@ The full, tested configuration (including the live-interface settings) is in
 ## Install
 
 ```bash
+git clone https://github.com/juhaj77/snort_dashboard.git
+cd snort_dashboard
 cd server && npm install
 cd ../client && npm install
 ```
