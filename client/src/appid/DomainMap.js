@@ -68,7 +68,7 @@ const DomainMap = ({ hosts, now, selected, onSelect }) => {
                   const fresh = now - h.last < 8000
                   const isSel = sel === h.host
                   return (
-                    <g key={h.host} className="am-host" style={{ transform: `translate(${c.x * s}px, ${c.y * s}px)` }}
+                    <g key={h.host} className="am-host" data-selectable="" style={{ transform: `translate(${c.x * s}px, ${c.y * s}px)` }}
                        onMouseMove={e => setHover({ h, x: e.nativeEvent.offsetX, y: e.nativeEvent.offsetY })}
                        onClick={() => onSelect(isSel ? null : h.host)}>
                       {h.period && <circle r={r + 4} className="am-orbit" />}

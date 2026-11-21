@@ -60,6 +60,7 @@ const RuleHeatmap = ({ rules, since, step, bins, focus, onFocus, limit }) => {
                 {r.scores.map((s, b) =>
                   <rect key={'h' + b} x={plotL + b * cw} y={y} width={cw} height={ROW_H} fill="transparent"
                         style={{ cursor: s.count ? 'pointer' : 'default' }}
+                        data-selectable={s.count ? '' : undefined}
                         onMouseMove={e => setHover({ r, b, s, x: e.nativeEvent.offsetX, y: e.nativeEvent.offsetY })}
                         onClick={() => s.count && onFocus({ rule: r.rule, msg: r.msg, priority: r.priority,
                           from: since + b * step, to: since + (b + 1) * step })} />)}

@@ -1,9 +1,10 @@
-import React, { useState, useEffect, useMemo } from 'react'
+import React, { useState, useEffect, useMemo, useCallback } from 'react'
 import io from 'socket.io-client'
 import AppId from './AppId';
 import { Panel, Status } from './Panel';
 import { Section } from './overview/ui';
 import { SOCKET, getJson } from './api';
+import useClearOnEmptyClick from './useClearOnEmptyClick';
 import { fmtNum } from './overview/format';
 import DomainMap, { kindColor } from './appid/DomainMap';
 import HostRhythm from './appid/HostRhythm';
@@ -33,6 +34,8 @@ function AppIds() {
   const [connected, setConnected] = useState(socket.connected)
   const [win, setWin] = useState('1h')
   const [selected, setSelected] = useState(null)
+  // a click on empty space (or anything that is not a host) clears the host selection
+  useClearOnEmptyClick(selected !== null, useCallback(() => setSelected(null), []))
   const [now, setNow] = useState(Date.now())
 
   useEffect(() => {
@@ -159,7 +162,7 @@ function AppIds() {
                        note="×N = sessions with this host in the window; click it to focus the host">
                 {rows.length === 0
                   ? <div className="viz-empty">No events for this host in memory.</div>
-                  : <div className="table-wrap">
+                  : <div className="table-wrap" data-keep-selection="">
                       <table className="grid">
                         <thead>
                           <tr>

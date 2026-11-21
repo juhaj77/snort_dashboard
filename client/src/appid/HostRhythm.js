@@ -47,7 +47,7 @@ const HostRhythm = ({ hosts, from, to, selected, onSelect }) => {
             const isSel = selected === h.host
             const dim = selected && !isSel
             return (
-              <g key={h.host} opacity={dim ? 0.4 : 1} className="ar-row"
+              <g key={h.host} opacity={dim ? 0.4 : 1} className="ar-row" data-selectable=""
                  onMouseMove={e => setHover({ h, x: e.nativeEvent.offsetX, y: e.nativeEvent.offsetY })}
                  onClick={() => onSelect(isSel ? null : h.host)}>
                 <rect x={0} y={y0} width={width} height={ROW_H}

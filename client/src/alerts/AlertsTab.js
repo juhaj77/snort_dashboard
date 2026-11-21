@@ -6,6 +6,7 @@ import { fmtClock, fmtDay, fmtNum } from '../overview/format'
 import { analyse, pickStep } from './anomaly'
 import RuleHeatmap from './RuleHeatmap'
 import { LiveList, HistoryList, FocusList, TextFilter } from './AlertList'
+import useClearOnEmptyClick from '../useClearOnEmptyClick'
 
 const WINDOWS = [
   { id: '1h', label: '1 h', seconds: 3600, refresh: 30000 },
@@ -68,6 +69,8 @@ function AlertsTab() {
     setFocus(f)
     setListMode('focus')
   }, [focus, clearFocus])
+  // a click on empty space (or anything that is not a burst or cell) clears the selection
+  useClearOnEmptyClick(focus !== null, clearFocus)
   // Esc clears the selection
   useEffect(() => {
     if (!focus) return

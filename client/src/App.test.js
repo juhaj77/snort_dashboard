@@ -90,6 +90,12 @@ test('AppID list marks repeated hosts and focuses one on click', async () => {
   fireEvent.click(chips[0]);
   expect(document.querySelectorAll('tbody tr.row')).toHaveLength(2);
   expect(screen.getByText('Latest events · a.example')).toBeInTheDocument();
+  // clicking inside the table keeps the selection, clicking empty space clears it
+  fireEvent.click(document.querySelector('tbody tr.row td.mono'));
+  expect(screen.getByText('Latest events · a.example')).toBeInTheDocument();
+  fireEvent.click(document.querySelector('.panel-desc'));
+  expect(screen.getByText('Latest events')).toBeInTheDocument();
+  expect(document.querySelectorAll('tbody tr.row')).toHaveLength(3);
 });
 
 test('Performance tab summarises perf_monitor data', async () => {
@@ -229,6 +235,16 @@ test('Alerts tab ranks an unusual burst and lists its alerts on click', async ()
   fireEvent.click(card)
   expect(await screen.findByRole('tab', { name: 'Selected burst' })).toBeInTheDocument()
   fireEvent.keyDown(window, { key: 'Escape' })
+  expect(screen.queryByRole('tab', { name: 'Selected burst' })).toBeNull()
+  expect(card).not.toHaveClass('episode-on')
+  expect(await screen.findByText(alert(1).src_ap)).toBeInTheDocument()
+
+  // a click on empty space clears the selection; a click in the alert table does not
+  fireEvent.click(card)
+  expect(await screen.findByText('10.0.0.66:1')).toBeInTheDocument()
+  fireEvent.click(screen.getByText('10.0.0.66:1'))  // opens the row's details
+  expect(screen.getByRole('tab', { name: 'Selected burst' })).toBeInTheDocument()
+  fireEvent.click(screen.getByText('Unusual bursts'))
   expect(screen.queryByRole('tab', { name: 'Selected burst' })).toBeNull()
   expect(card).not.toHaveClass('episode-on')
   expect(await screen.findByText(alert(1).src_ap)).toBeInTheDocument()

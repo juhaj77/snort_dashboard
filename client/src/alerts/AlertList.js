@@ -33,7 +33,7 @@ const sortBy = (list, sort) => {
 }
 
 const AlertTable = ({ alerts, onSort, openKey, onToggle, fresh }) =>
-  <div className="table-wrap">
+  <div className="table-wrap" data-keep-selection="">
     <table className="grid">
       <AlertHeader onSort={onSort} />
       <tbody>
