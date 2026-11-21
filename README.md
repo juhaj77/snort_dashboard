@@ -1,35 +1,120 @@
 # snort_dashboard: Snort 3 IDS dashboard and log viewer
 
-**A web UI for Snort 3 intrusion detection (IDS) logs: a SOC-style network security overview
-dashboard plus views for alerts, AppID sessions, alert search and performance counters.**
-Built with React and Node.js/Express for home labs, blue teams and anyone running Snort on
-Linux or on Windows through WSL2.
+**A SOC-style web console for Snort 3 intrusion detection. It shows what your network is doing,
+which hosts deserve a look and why, and how healthy the sensor itself is, using only the log
+files Snort already writes.**
 
-The server reads Snort's log files directly. No database is needed:
+![Network view: a live connection map of every host this computer talks to, coloured by Snort alert severity, with flagged hosts and a details panel](/screenshots/l.png)
+
+Built with React and Node.js/Express for home labs, blue teams and anyone running Snort on Linux
+or on Windows through WSL2.
+
+- **No database and no agents.** The server reads Snort's own log files from the end, so even
+  months of logs open instantly.
+- **Read-only.** It never changes Snort, its configuration or your capture setup, and nothing
+  is sent to outside services.
+- **Explains instead of scoring.** Hosts are flagged by plain, visible rules (P1/P2 alerts, a
+  sudden rise in alerts, inbound connections from the internet, …), each shown with its reason.
+- **Works on Linux and Windows.** That includes a Windows PC whose traffic is inspected by Snort
+  in WSL2.
+
+The logs it reads:
 
 - `/var/log/snort/alert_json.txt` (`alert_json`)
 - `/var/log/snort/appid.json` (`appid_listener` from [snort3_extra](https://github.com/snort3/snort3_extra))
 - `/var/log/snort/perf_monitor_base.csv` (`perf_monitor`)
 
-> **Running Snort on Windows?** [ENVIRONMENT.md](ENVIRONMENT.md) is a step-by-step guide
-> for monitoring a **Windows host's network traffic** with Snort 3 running in **WSL2**. It
-> covers forwarding the Windows capture (Npcap/`dumpcap`) to a virtual interface in WSL,
-> the `snort.lua` settings, systemd services, starting at logon and the Node.js setup.
-> The same `snort.lua` settings apply on a plain Linux machine.
+> **Running Snort on Windows?** [ENVIRONMENT.md](ENVIRONMENT.md) is a step-by-step guide to
+> monitoring a **Windows host's network traffic** with Snort 3 in **WSL2**. It covers forwarding
+> the Windows capture (Npcap/`dumpcap`) to a virtual interface in WSL, the `snort.lua` settings,
+> systemd services, starting at logon and the Node.js setup. The same `snort.lua` settings work
+> on a plain Linux machine.
 >
-> **Network tab tools** (nmap, traceroute, tshark, net-tools) and their setup on Linux, WSL and
-> Windows are described in [NETWORK.md](NETWORK.md).
+> **Network tab tools** (nmap, traceroute, tshark, net-tools) and how to set them up on Linux,
+> WSL and Windows are covered in [NETWORK.md](NETWORK.md).
 
 ## Features
 
-| Tab | What it shows |
-|---|---|
-| **Overview** | Security dashboard for a time window (15 min, 1 h, 6 h, 24 h or the latest 5,000 alerts). It shows alert activity over time stacked by severity, the share of each severity, top source and destination IPs, top signatures, protocols, destination ports, classifications and the AppID application mix. An event timeline and a recent-events list open a details panel with addresses, ports, protocol, rule (gid:sid:rev) and a Wireshark filter. Clicking a bar, a severity or a time column filters every chart. |
-| **Network** | Live connection map in the style of a SOC console: this computer in the centre, every host it talks to around it, grouped by process, service or network and coloured by Snort alert severity. Hosts that match a simple rule (P1/P2 alerts, rising alerts, inbound from the internet, service on an unexpected port, new) get a badge and are listed under **Needs attention**, each with its reason, over a 1 h / 6 h / 24 h window of the Snort and AppID logs. Select a host to see why it was flagged, its alert and AppID activity over time, its connections, alerts, AppID data and names, and run a **traceroute** or (on your own network) an **nmap** port scan. Works on Linux and Windows, including a Windows host monitored from WSL. See [NETWORK.md](NETWORK.md). |
-| **Alerts** | The latest alerts, refreshed every 5 seconds (paused while an alert's details are open). Click a row to see all fields and a **Wireshark filter** built from the packet timestamp. |
-| **AppID** | The latest AppID sessions from `appid.json` as soon as the tab opens; new ones stream in live over a socket connection. |
-| **Search** | Load the latest N alerts, filter them by time range or by text (include or exclude), sort by any column, or sort by rarity. |
-| **Performance** | Health of the current Snort run from `perf_monitor` over a chosen time range (1 h … 30 d or the whole run; long ranges are averaged on the server): packet rate, throughput, dropped packets, alerts, flows, inspector activity and traffic anomalies over time. All raw counters are one click away. |
+### Overview: the security picture at a glance
+
+![Overview dashboard: alert KPIs, severity split, alert activity stacked by severity, top sources, destinations and signatures, protocols, ports, classifications, AppID applications and an event timeline](/screenshots/k.png)
+
+Pick a time window (15 min, 1 h, 6 h, 24 h or the latest 5,000 alerts) to see:
+
+- alert volume and rate over time, stacked by severity, and the share of each severity
+- top source and destination IPs, top signatures, protocols, destination ports and
+  classifications
+- the AppID application mix
+- an event timeline and a recent-events list
+
+Click any bar, severity or time column and **every chart filters to it**. An event opens a
+details panel with its addresses, ports, protocol, rule (gid:sid:rev) and a ready-made
+**Wireshark filter**.
+
+### Network: who your computer talks to, and which hosts need a look
+
+The view at the top of this page:
+
+- **Connection map.** Your machine sits in the centre. Around it is every host it is connected
+  to, plus every host Snort or AppID saw it talk to. Hosts are grouped by process, service or
+  network and coloured by their most severe Snort alert.
+- **Needs attention.** Hosts that match a rule (P1/P2 alerts, alerts rising, inbound from the
+  internet, service on an unexpected port, new, uncommon remote port) get a badge and are
+  listed with their reasons, over a 1 h, 6 h or 24 h window of the logs.
+- **Host details.**
+  - why the host was flagged
+  - alert and AppID activity over time
+  - open connections and the processes behind them
+  - alert signatures and names (TLS SNI, HTTP Host, reverse DNS, DNS answers seen by tshark)
+  - one-click **traceroute**, and an **nmap** port scan for devices on your own network
+- **One device, one node.** The IPv4, IPv6 and link-local addresses of a device (for example
+  your router) are recognised by their MAC address and shown as one host.
+
+Details and setup: [NETWORK.md](NETWORK.md).
+
+### Alerts: the live feed
+
+![Alerts tab: the newest Snort alerts with priority badges, rule, protocol, source, destination, message and classification](/screenshots/a.png)
+
+The newest alerts, refreshed every 5 seconds. Click a row for every field and a Wireshark filter
+built from the packet timestamp. While an alert's details are open the feed pauses, so the row
+doesn't jump away; a counter shows how many new alerts are waiting.
+
+### AppID: what applications are on the wire
+
+![AppID tab: application sessions with client and service addresses and ports, DNS host and TLS host names, unknown services highlighted](/screenshots/b.png)
+
+Every session Snort's application identification sees: client and service, addresses and ports,
+and the DNS and TLS server names behind them. Recent sessions are shown as soon as the tab opens,
+and new ones appear the moment Snort writes them (pushed over socket.io, no polling).
+Unidentified services are highlighted.
+
+### Search: dig through alert history
+
+![Search tab: an alert expanded to all its fields with a Wireshark filter](/screenshots/c.png)
+
+Load the latest N alerts and narrow them down:
+
+- by time range, or by text (include or exclude)
+- sort by any column, or **rarest first** to bring unusual signatures to the top
+
+![Search tab: SSL, DNS spoof and local ICMP alerts over IPv4 and IPv6](/screenshots/d.png)
+
+### Performance: is the sensor keeping up?
+
+![Performance tab: packet rate, throughput, packet drops, alerts, new flows by transport, active flows, inspector activity and capture-health counters](/screenshots/i.png)
+
+The health of the current Snort run from `perf_monitor`:
+
+- packet rate, throughput and **dropped packets** (capture loss means Snort missed traffic)
+- alerts, new and active flows
+- inspector activity, and traffic anomalies such as TCP gaps and malformed headers
+- all raw counters, one click away
+
+Choose 1 h … 30 d or the whole run. Long ranges are averaged on the server, so a run of months
+still draws useful graphs.
+
+---
 
 Severity follows the Snort priority: **P1 high**, **P2 medium**, **P3 low**, **P4 very low**.
 **P0** means the rule sets no priority. The colours are the same in every view.
@@ -37,8 +122,9 @@ Severity follows the Snort priority: **P1 high**, **P2 medium**, **P3 low**, **P
 ## Requirements
 
 - Snort 3 with `alert_json`, `perf_monitor` and `appid`, and `appid_listener` from snort3_extra
-- Node.js 18 or newer (tested with 22). On WSL, use a Linux Node such as nvm, not the
-  Windows one. See [ENVIRONMENT.md § 11](ENVIRONMENT.md#11-nodejs-environment-for-snort_log_view).
+- Node.js 18 or newer (tested with 22). On WSL, use a Linux Node such as nvm, not the Windows
+  one. See [ENVIRONMENT.md § 11](ENVIRONMENT.md#11-nodejs-environment-for-snort_log_view).
+- Optional, for the Network tab: nmap, traceroute and tshark (see [NETWORK.md](NETWORK.md))
 
 ## Snort configuration
 
@@ -99,11 +185,14 @@ npm start
 
 Open <http://localhost:3000>.
 
-- The server runs with `sudo` because Snort writes `alert_json.txt` readable by root only.
-  `env "PATH=$PATH"` lets `sudo` find a Node installed with nvm.
-- Start the server with `npm start`, not `node app.js`. Only `npm start` opens the REST API
-  on port 9000, which the Overview, Alerts, Search and Performance tabs need.
+- The server runs with `sudo` because Snort writes `alert_json.txt` readable by root only. Root
+  also lets the Network tab see the process behind every connection. `env "PATH=$PATH"` lets
+  `sudo` find a Node installed with nvm.
+- Start the server with `npm start`, not `node app.js`. Only `npm start` opens the REST API on
+  port 9000, which all tabs need.
 - Restart the server after updating the code.
+- The API has no authentication. Keep ports 9000 and 3009 reachable only from your own machine
+  or a trusted network.
 
 ### Configuration
 
@@ -135,24 +224,8 @@ Malformed or half-written log lines are skipped.
 
 ```bash
 cd client && npm test   # UI and data model
-cd server && npm test   # tool output parsers
+cd server && npm test   # log readers and tool output parsers
 ```
-
-## Screenshots
-
-The overview view
-![overview](/screenshots/k.png)
-The Network view shows the current network connections
-![network view](/screenshots/l.png)
-The alert view shows the latest alerts
-![alert view](/screenshots/a.png)
-The AppID view is updated over a socket connection
-![appid view](/screenshots/b.png)
-The search tab has various search and sorting features
-![search view](/screenshots/c.png)
-![search view](/screenshots/d.png)
-Performance dashboard
-![perf monitor view](/screenshots/i.png)
 
 ## License
 
