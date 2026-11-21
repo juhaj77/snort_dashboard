@@ -31,8 +31,9 @@ The logs it reads:
 > **Running Snort on Windows?** [ENVIRONMENT.md](ENVIRONMENT.md) is a step-by-step guide to
 > monitoring a **Windows host's network traffic** with Snort 3 in **WSL2**. It covers forwarding
 > the Windows capture (Npcap/`dumpcap`) to a virtual interface in WSL, the `snort.lua` settings,
-> systemd services, starting at logon and the Node.js setup. The same `snort.lua` settings work
-> on a plain Linux machine.
+> systemd services, starting at logon and the Node.js setup. On a plain Linux machine you only
+> need the log outputs from [Snort configuration](#snort-configuration); point Snort at your own
+> network interface instead of the WSL-only `snort0`.
 >
 > **Network tab tools** (nmap, traceroute, tshark, net-tools) and how to set them up on Linux,
 > WSL and Windows are covered in [NETWORK.md](NETWORK.md).
@@ -203,8 +204,10 @@ snort -c /usr/local/etc/snort/snort.lua \
 - `-l /var/log/snort` puts the log files where the server looks for them.
 - `--plugin-path` loads `appid_listener`. Without it the plugin is silently missing.
 
-The full, tested configuration (including the live-interface settings) is in
-[`snort/snort.lua`](snort/snort.lua) and explained in [ENVIRONMENT.md § 5](ENVIRONMENT.md#5-configure-snortlua).
+The full, tested configuration is in [`snort/snort.lua`](snort/snort.lua) and explained in
+[ENVIRONMENT.md § 5](ENVIRONMENT.md#5-configure-snortlua). It is written for the WSL setup: its
+`daq` block reads the virtual interface `snort0`. On plain Linux, replace `snort0` with your
+own interface (for example `eth0`), or remove the `daq` block and pass `-i <interface>`.
 
 ## Install
 

@@ -35,6 +35,9 @@ include 'snort_defaults.lua'
 -- Windows traffic is captured with Npcap/dumpcap.exe and written into the
 -- dummy interface snort0 by pcap2iface.py. Snort reads it as a live interface.
 -- Command-line options still override these (-i, -s, -k).
+-- On plain Linux (no WSL), replace 'snort0' with your own interface, e.g. 'eth0'.
+-- checksum_eval = 'none' is still useful there: with checksum offload the host's
+-- own outgoing packets are captured before the NIC fills in their checksums.
 -- Note: -l and --plugin-path can NOT be set from Lua; pass them on the command
 -- line (the systemd unit in snort/systemd/snort.service does that).
 
