@@ -70,9 +70,10 @@ can form.
 |---|---|---|
 | `snort/snort.lua` | Snort configuration used by this project | symlinked from `/usr/local/etc/snort/snort.lua` |
 | `snort/pcap2iface.py` | PCAP stream (stdin) → Linux interface | `/usr/local/bin/pcap2iface.py` |
-| `snort/snort-forward.sh` | runs `dumpcap.exe \| pcap2iface.py` and restarts the pipe if it breaks | `/usr/local/bin/snort-forward.sh` |
+| `snort/snort-forward.sh` | runs `dumpcap.exe \| pcap2iface.py`, restarts the pipe if it breaks, only one instance at a time | `/usr/local/bin/snort-forward.sh` |
 | `snort/systemd/snort0-iface.service` | creates `snort0` at WSL boot | `/etc/systemd/system/` |
 | `snort/systemd/snort.service` | runs Snort at WSL boot | `/etc/systemd/system/` |
+| `snort/systemd/snort-forward.service` | runs `snort-forward.sh` at WSL boot | `/etc/systemd/system/` |
 
 ---
 
@@ -218,6 +219,7 @@ sudo install -m 755 snort/pcap2iface.py   /usr/local/bin/pcap2iface.py
 sudo install -m 755 snort/snort-forward.sh /usr/local/bin/snort-forward.sh
 sudo install -m 644 snort/systemd/snort0-iface.service /etc/systemd/system/
 sudo install -m 644 snort/systemd/snort.service        /etc/systemd/system/
+sudo install -m 644 snort/systemd/snort-forward.service /etc/systemd/system/
 sudo systemctl daemon-reload
 ```
 The scripts are copied rather than symlinked because they run as root. Re-run `install` after
@@ -253,7 +255,10 @@ sudo -v    # ask for the password first so it doesn't mix with the pipe
   | sudo /usr/local/bin/pcap2iface.py snort0
 ```
 Instead of the pipe, you can run `sudo /usr/local/bin/snort-forward.sh`, which does the same
-and restarts automatically. Its settings can be overridden: `sudo WIN_IFACE="Wi-Fi"
+and restarts automatically. If `snort-forward.service` (section 9.1) is already running, the
+script only prints `another forwarder is running, waiting...` and waits; the plain pipe above
+does **not** check this, so stop the service first (`sudo systemctl stop snort-forward`) or
+every packet reaches Snort twice. Its settings can be overridden: `sudo WIN_IFACE="Wi-Fi"
 CAPTURE_FILTER="not port 3389" /usr/local/bin/snort-forward.sh`.
 
 * `-F pcap`: classic PCAP. The forwarder does not read pcapng. Old `-P` still works but is
@@ -269,6 +274,9 @@ binary data unchanged. Windows PowerShell 5.1 corrupts binary pipes. PowerShell 
 ```bat
 "C:\Program Files\Wireshark\dumpcap.exe" -i Ethernet -F pcap -q -w - | wsl.exe -u root -e /usr/local/bin/pcap2iface.py snort0
 ```
+
+This calls `pcap2iface.py` directly, without the single-instance lock of `snort-forward.sh`:
+stop `snort-forward.service` first if it is installed.
 
 Stop the forwarder with `Ctrl+C`. Snort keeps running and continues when forwarding restarts.
 
@@ -303,16 +311,38 @@ The pieces and what keeps each one alive:
 | systemd in WSL | `/etc/wsl.conf` → `[boot] systemd=true` (already set) |
 | `snort0` interface | `snort0-iface.service` (systemd) |
 | Snort | `snort.service` (systemd) |
-| Forwarder + keeping WSL running | Windows Task Scheduler task at logon |
+| Forwarder | `snort-forward.service` (systemd), also after a WSL restart |
+| Keeping WSL running | Windows Task Scheduler task at logon |
 | Snort config | `snort/snort.lua` in this repo, symlinked (section 5.1) |
 
 ### 9.1 WSL side (systemd)
 
 **[WSL]** (after section 6)
 ```bash
-sudo systemctl enable --now snort0-iface.service snort.service
-systemctl status snort0-iface snort --no-pager
+sudo systemctl enable --now snort0-iface.service snort.service snort-forward.service
+systemctl status snort0-iface snort snort-forward --no-pager
 journalctl -u snort -f            # Snort output
+journalctl -u snort-forward -f    # forwarder / dumpcap output
+```
+
+**Why the forwarder is a systemd service.** Until 2026-11-21 the forwarder was started only by
+the Windows logon task (9.2). When the WSL VM stopped and started again in the middle of a
+session (`wsl --shutdown`, Windows sleep or update, WSL crash), systemd brought back `snort0`
+and Snort, but nothing started the forwarder: Snort ran on an interface that received no
+packets, and the dashboard looked broken (see "After a WSL restart" in section 10). The
+service starts the forwarder at every WSL boot.
+
+It works because systemd services can start Windows programs through WSL interop. Services do
+not get the `WSL_INTEROP` variable, but WSL falls back to `/run/WSL/1_interop`. Tested on
+2026-11-21: `dumpcap.exe -D` and a 20-packet capture on `Ethernet`, both started from a
+systemd unit. `dumpcap.exe` has to be allowed to capture without elevation (section 3); a
+service cannot answer a UAC prompt.
+
+**Settings.** Put overrides in `/etc/default/snort-forward`, one `VAR=value` per line, then
+`sudo systemctl restart snort-forward`:
+```bash
+WIN_IFACE=Wi-Fi
+CAPTURE_FILTER=not port 3389
 ```
 After editing `snort/snort.lua`:
 ```bash
@@ -323,8 +353,14 @@ Restarting Snort clears `appid.json` (see section 10).
 ### 9.2 Windows side (Task Scheduler)
 
 WSL shuts the distribution down when no Windows process is attached to it, and that would
-stop the systemd services too. Starting the forwarder from Windows at logon solves both
-problems. It runs the capture, and its `wsl.exe` process keeps the distribution running.
+stop the systemd services too. A systemd service does not count as an attached process, so
+the forwarder service (9.1) alone does not keep WSL running. The logon task solves that: its
+`wsl.exe` process keeps the distribution running.
+
+The task runs the same `snort-forward.sh`. The script lets only one instance forward
+(a lock in `/run/snort-forward.lock`), so when the service is already forwarding, the task's
+copy just waits. That is intended: the waiting `wsl.exe` keeps WSL alive, and it takes over
+if the service stops. Two forwarders at once would inject every packet twice.
 
 **[Windows, PowerShell (admin)]**
 ```powershell
@@ -344,6 +380,12 @@ Start-ScheduledTask -TaskName "snort-forward"
 
 > The Task Scheduler setup has **not** been tested on this machine yet. The forwarding
 > command it runs has been tested.
+>
+> The task only runs at logon. If WSL stops later in the session, the task's `wsl.exe` ends
+> with it; `-RestartCount 3` restarts the task only if Task Scheduler sees it as failed. The
+> systemd service brings back the forwarding itself as soon as WSL starts again (for example
+> when you open a WSL terminal), but to keep WSL running for good, start the task again:
+> `Start-ScheduledTask -TaskName "snort-forward"`.
 
 ### 9.3 Check after a reboot
 
@@ -351,7 +393,9 @@ Start-ScheduledTask -TaskName "snort-forward"
 ```bash
 ip -br link show snort0                # UP / UNKNOWN
 systemctl is-active snort              # active
+systemctl is-active snort-forward      # active
 pgrep -af pcap2iface                   # forwarder running
+ip -s link show snort0                 # RX packets keep growing
 sudo tcpdump -i snort0 -n -c 5         # packets arriving
 ```
 
@@ -370,6 +414,28 @@ sudo tcpdump -i snort0 -n -c 5         # packets arriving
 This is why Snort runs once on `snort0` instead of being restarted for every capture chunk.
 To keep AppID history across restarts, copy the file first, e.g. **[WSL]**
 `sudo cp /var/log/snort/appid.json /var/log/snort/appid.$(date +%s).json`
+
+**After a WSL restart.** If the WSL VM was stopped and started again (`uptime` is short;
+`journalctl --list-boots` shows a new boot, and the previous boot ends without a shutdown),
+the dashboard shows this until packets flow again:
+
+| View | What you see | Why |
+|---|---|---|
+| Performance | empty | `perf_monitor_base.csv` gets only a new header row; data rows are written only while packets arrive |
+| AppID | empty | Snort truncates `appid.json` on start; the AppID history before the restart is gone |
+| Alerts / Overview, 15 min | missing alerts | no packets → no alerts since the restart; older alerts are still in `alert_json.txt` and its rotated files |
+
+Check where the chain broke, in this order **[WSL]**:
+```bash
+uptime; journalctl --list-boots --no-pager | tail -2    # did WSL restart?
+systemctl is-active snort0-iface snort snort-forward     # all "active"
+ip -s link show snort0                                   # RX packets 0 → forwarder not delivering
+journalctl -u snort-forward -n 20 --no-pager             # dumpcap errors (adapter name, permissions)
+```
+With `snort-forward.service` enabled (9.1) the forwarder comes back by itself. Without it,
+start it by hand: `sudo /usr/local/bin/snort-forward.sh` (or `Start-ScheduledTask -TaskName
+"snort-forward"` on Windows). The snort_log_view server and client also stopped with WSL;
+start them again (section 11.3).
 
 **Other notes:**
 * **Alerts `116:3 "IPv4 datagram length < header field"`** come from Windows Large Send

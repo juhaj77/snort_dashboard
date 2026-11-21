@@ -311,5 +311,6 @@ only from your own machine or a trusted network.
 | **Port scan** / **Discover LAN** disabled | Install `nmap`. |
 | Port scan says the host did not answer | A firewall on the device drops probes; that is common for phones and Windows PCs. |
 | "tshark: interface snort0 not found" | Start the forwarder (ENVIRONMENT.md § 7) or set `NET_CAPTURE_IFACE`. |
+| Map, alerts and AppID stop updating after WSL restarted | The forwarder did not come back: enable `snort-forward.service` (ENVIRONMENT.md § 9.1, "After a WSL restart" in § 10). |
 | "tshark exited" | Run the tshark command above by hand as root to see the error. |
 | Network tab shows "Could not load data … 404" | Restart the server; it predates the Network tab. |
