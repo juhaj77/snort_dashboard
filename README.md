@@ -37,6 +37,23 @@ The logs it reads:
 > **Network tab tools** (nmap, traceroute, tshark, net-tools) and how to set them up on Linux,
 > WSL and Windows are covered in [NETWORK.md](NETWORK.md).
 
+## Contents
+
+- [Features](#features)
+  - [Overview: the security picture at a glance](#overview-the-security-picture-at-a-glance)
+  - [Network: who your computer talks to, and which hosts need a look](#network-who-your-computer-talks-to-and-which-hosts-need-a-look)
+  - [Alerts: which alerts are out of the ordinary](#alerts-which-alerts-are-out-of-the-ordinary)
+  - [AppID: what applications are on the wire](#appid-what-applications-are-on-the-wire)
+  - [Performance: is the sensor keeping up?](#performance-is-the-sensor-keeping-up)
+- [Requirements](#requirements)
+- [Snort configuration](#snort-configuration)
+- [Install](#install)
+- [Start](#start)
+  - [Configuration](#configuration)
+- [API](#api)
+- [Tests](#tests)
+- [License](#license)
+
 ## Features
 
 ### Overview: the security picture at a glance
