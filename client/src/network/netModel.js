@@ -28,25 +28,119 @@ export const SCOPE_LABEL = { lan: 'Local network', 'link-local': 'Link-local', i
 const add = (map, key, n = 1) => map.set(key, (map.get(key) || 0) + n)
 const topKey = map => [...map.entries()].sort((a, b) => b[1] - a[1] || String(a[0]).localeCompare(String(b[0])))[0]?.[0]
 
-const emptyNode = ip => ({
-  ip, scope: scopeOf(ip), conns: [], processes: new Map(), remotePorts: new Map(),
+// ---------------------------------------------------------------------------
+// IPv6 helpers
+
+/** "2001:db8::1" → [0x2001, 0xdb8, 0, 0, 0, 0, 0, 1]; null for anything else */
+export const expand6 = ip => {
+  if (!ip || !ip.includes(':') || ip.includes('.')) return null
+  const v = ip.replace(/%.*$/, '').toLowerCase()
+  const halves = v.split('::')
+  if (halves.length > 2) return null
+  const part = h => (h ? h.split(':') : [])
+  const head = part(halves[0]), tail = part(halves[1])
+  const fill = halves.length === 2 ? 8 - head.length - tail.length : 0
+  if (fill < 0 || (halves.length === 1 && head.length !== 8)) return null
+  const groups = [...head, ...Array(fill).fill('0'), ...tail]
+  if (groups.length !== 8 || groups.some(g => !/^[0-9a-f]{1,4}$/.test(g))) return null
+  return groups.map(g => parseInt(g, 16))
+}
+const prefix64 = ip => { const g = expand6(ip); return g ? g.slice(0, 4).join(':') : null }
+
+/** MAC address embedded in an EUI-64 interface id (…:xxff:fexx:…), or null */
+export const eui64Mac = ip => {
+  const g = expand6(ip)
+  if (!g) return null
+  const b = g.slice(4).flatMap(x => [x >> 8, x & 255])
+  if (b[3] !== 0xff || b[4] !== 0xfe) return null
+  return [b[0] ^ 2, b[1], b[2], b[5], b[6], b[7]].map(x => x.toString(16).padStart(2, '0')).join(':')
+}
+
+const SCOPE_RANK = { lan: 4, 'link-local': 3, internet: 2, loopback: 1 }
+// which address names a device: IPv4 first, then global IPv6, then link-local
+const addrRank = (ip, scope) => (!ip.includes(':') ? 0 : scope === 'link-local' ? 2 : 1)
+
+const emptyNode = (ip, scope) => ({
+  ip, addrs: new Set([ip]), scope, conns: [], processes: new Map(), remotePorts: new Map(),
   inbound: 0, outbound: 0, names: new Set(),
   alertCount: 0, sev: { 1: 0, 2: 0, 3: 0, 4: 0, 0: 0 }, sigs: [], sigCount: 0, alertHist: null,
   maxSev: null, appid: new Map(), appSessions: 0, appHist: null, services: [],
   neighbor: null, gateway: false, discovered: null, signals: [],
 })
 
+const addBins = (a, b) => (a || []).map((x, i) => x + ((b || [])[i] || 0))
+// one device can have several addresses: add up what the logs say about each of them
+const mergeAlerts = (a, b) => {
+  if (!a) return b
+  const sigs = new Map(a.sigs.map(x => [x.msg, { ...x }]))
+  b.sigs.forEach(x => { const y = sigs.get(x.msg); if (y) { y.count += x.count; y.last = Math.max(y.last, x.last) } else sigs.set(x.msg, { ...x }) })
+  const sev = { ...a.sev }
+  Object.entries(b.sev || {}).forEach(([k, v]) => { sev[k] = (sev[k] || 0) + v })
+  return {
+    n: a.n + b.n, sev, first: Math.min(a.first, b.first), last: Math.max(a.last, b.last), recent: a.recent + b.recent,
+    bins: addBins(a.bins, b.bins), sigs: [...sigs.values()].sort((x, y) => (x.priority || 5) - (y.priority || 5) || y.count - x.count),
+    sigCount: Math.max(a.sigCount || 0, b.sigCount || 0, sigs.size),
+  }
+}
+const mergeAppid = (a, b) => {
+  if (!a) return b
+  const apps = { ...a.apps }
+  Object.entries(b.apps || {}).forEach(([k, v]) => { apps[k] = (apps[k] || 0) + v })
+  return {
+    n: a.n + b.n, first: Math.min(a.first, b.first), last: Math.max(a.last, b.last), recent: a.recent + b.recent,
+    bins: addBins(a.bins, b.bins), apps, names: [...new Set([...(a.names || []), ...(b.names || [])])],
+    services: [...(a.services || []), ...(b.services || [])],
+  }
+}
+
 /**
  * @param snapshot  /network/snapshot response
  * @param hist      /network/history response: per-address alert and AppID counts for the window
  * @param opts      { seen: include peers only Snort/AppID saw, lan: include ARP neighbours,
  *                    loopback, discovered: nmap ping-sweep hosts }
+ *
+ * Addresses of one device (same MAC in the neighbour table, or a MAC embedded in an IPv6
+ * EUI-64 address) become one node, named by its IPv4 address when it has one. IPv6 addresses
+ * in the same /64 as one of this machine's addresses are on the local network.
  */
 export const buildPeers = (snapshot, hist = null, opts = {}) => {
-  const local = new Set((snapshot?.host?.addrs || []).map(a => a.ip))
+  const hostAddrs = (snapshot?.host?.addrs || []).map(a => a.ip)
+  const local = new Set(hostAddrs)
   const isLocal = ip => !ip || local.has(ip) || UNSPEC.has(ip)
+  const prefixes = new Set(hostAddrs.filter(ip => scopeOf(ip) === 'internet').map(prefix64).filter(Boolean))
+  const scopeAt = ip => { const s = scopeOf(ip); return s === 'internet' && prefixes.has(prefix64(ip)) ? 'lan' : s }
+
+  // device = MAC address; its addresses come from the neighbour tables and EUI-64 addresses
+  const neighbors = (snapshot?.neighbors || []).filter(x => scopeOf(x.ip) !== 'multicast')
+  const macOf = new Map()
+  neighbors.forEach(x => { if (x.mac) macOf.set(x.ip, x.mac.toLowerCase()) })
+  const macFor = ip => {
+    if (macOf.has(ip)) return macOf.get(ip)
+    const s = scopeAt(ip)
+    return s === 'lan' || s === 'link-local' ? eui64Mac(ip) : null
+  }
+  const seenIps = new Set([
+    ...(snapshot?.connections || []).map(c => c.remoteIp), ...Object.keys((hist && hist.hosts) || {}),
+    ...neighbors.map(x => x.ip), ...(opts.discovered || []).map(h => h.ip),
+  ].filter(ip => ip && !isLocal(ip)))
+  const primary = new Map() // mac → address that names the device
+  seenIps.forEach(ip => {
+    const mac = macFor(ip)
+    if (!mac) return
+    const cur = primary.get(mac)
+    const rank = x => addrRank(x, scopeAt(x))
+    if (!cur || rank(ip) < rank(cur) || (rank(ip) === rank(cur) && ip.localeCompare(cur) < 0)) primary.set(mac, ip)
+  })
+  const canon = ip => { const mac = macFor(ip); return (mac && primary.get(mac)) || ip }
+
   const peers = new Map()
-  const get = ip => { if (!peers.has(ip)) peers.set(ip, emptyNode(ip)); return peers.get(ip) }
+  const get = ip => {
+    const key = canon(ip)
+    if (!peers.has(key)) peers.set(key, emptyNode(key, scopeAt(key)))
+    const n = peers.get(key)
+    n.addrs.add(ip)
+    return n
+  }
   const allowed = ip => {
     if (UNSPEC.has(ip)) return false
     const s = scopeOf(ip)
@@ -68,35 +162,40 @@ export const buildPeers = (snapshot, hist = null, opts = {}) => {
   // what Snort and AppID logged about each other address during the window
   Object.entries((hist && hist.hosts) || {}).forEach(([ip, h]) => {
     if (isLocal(ip) || !allowed(ip) || scopeOf(ip) === 'multicast') return
-    if (!live.has(ip) && !opts.seen) return
+    if (!live.has(canon(ip)) && !opts.seen) return
     if (!h || (!h.alerts && !h.appid)) return
     const n = get(ip)
-    if (h.alerts) {
-      n.alertHist = h.alerts
-      n.alertCount = h.alerts.n || 0
-      n.sev = { 0: 0, 1: 0, 2: 0, 3: 0, 4: 0, ...h.alerts.sev }
-      n.sigs = h.alerts.sigs || []
-      n.sigCount = h.alerts.sigCount || n.sigs.length
-    }
-    if (h.appid) {
-      n.appHist = h.appid
-      n.appSessions = h.appid.n || 0
-      Object.entries(h.appid.apps || {}).forEach(([k, v]) => { if (k !== 'unknown') add(n.appid, k, v) })
-      ;(h.appid.names || []).forEach(x => n.names.add(x))
-      n.services = h.appid.services || []
-    }
+    if (h.alerts) n.alertHist = mergeAlerts(n.alertHist, h.alerts)
+    if (h.appid) n.appHist = mergeAppid(n.appHist, h.appid)
   })
 
-  const neigh = new Map((snapshot?.neighbors || []).map(x => [x.ip, x]))
-  if (opts.lan) neigh.forEach((x, ip) => { if (allowed(ip) && scopeOf(ip) !== 'multicast') get(ip) })
+  const neigh = new Map(neighbors.map(x => [x.ip, x]))
+  if (opts.lan) neigh.forEach((x, ip) => { if (allowed(ip)) get(ip) })
   ;(opts.discovered || []).forEach(h => { if (allowed(h.ip)) { const n = get(h.ip); n.discovered = h; if (h.name) n.names.add(h.name) } })
 
   const wire = snapshot?.names || {}
   const gw = snapshot?.host?.gateway
   peers.forEach(n => {
-    n.neighbor = neigh.get(n.ip) || null
-    n.gateway = n.ip === gw
-    ;(wire[n.ip] || []).forEach(x => n.names.add(x))
+    const addrs = [...n.addrs].sort((a, b) => addrRank(a, scopeAt(a)) - addrRank(b, scopeAt(b)) || a.localeCompare(b))
+    n.addrs = addrs
+    n.scope = addrs.map(scopeAt).sort((a, b) => (SCOPE_RANK[b] || 0) - (SCOPE_RANK[a] || 0))[0] || n.scope
+    if (n.addrs.length > 1 && n.scope === 'link-local') n.scope = 'lan'
+    n.neighbor = addrs.map(ip => neigh.get(ip)).find(Boolean) || (macFor(n.ip) ? { mac: macFor(n.ip), state: 'from the IPv6 address' } : null)
+    n.gateway = !!gw && addrs.includes(gw)
+    if (n.alertHist) {
+      n.alertCount = n.alertHist.n || 0
+      n.sev = { 0: 0, 1: 0, 2: 0, 3: 0, 4: 0, ...n.alertHist.sev }
+      n.sigs = n.alertHist.sigs || []
+      n.sigCount = n.alertHist.sigCount || n.sigs.length
+    }
+    if (n.appHist) {
+      n.appSessions = n.appHist.n || 0
+      Object.entries(n.appHist.apps || {}).forEach(([k, v]) => { if (k !== 'unknown') add(n.appid, k, v) })
+      ;(n.appHist.names || []).forEach(x => n.names.add(x))
+      n.services = n.appHist.services || []
+    }
+    // names: TLS SNI / HTTP Host first, then what tshark saw on the wire
+    addrs.forEach(ip => (wire[ip] || []).forEach(x => n.names.add(x)))
     const sevs = [1, 2, 3, 4].filter(p => n.sev[p])
     n.maxSev = sevs.length ? sevs[0] : n.alertCount ? 0 : null
     n.live = n.conns.length > 0
@@ -261,7 +360,7 @@ export const nodeRadius = n => 4 + Math.min(6, Math.log2(1 + n.conns.length + Ma
 export const matches = (n, q) => {
   const s = q.trim().toLowerCase()
   if (!s) return true
-  return n.ip.toLowerCase().includes(s) || [...n.names].some(x => x.toLowerCase().includes(s)) ||
+  return (n.addrs || [n.ip]).some(a => a.toLowerCase().includes(s)) || [...n.names].some(x => x.toLowerCase().includes(s)) ||
     [...n.processes.keys()].some(x => x.toLowerCase().includes(s)) || [...n.appid.keys()].some(x => x.toLowerCase().includes(s))
 }
 
@@ -276,7 +375,8 @@ export const summary = (snapshot, peers) => {
     inbound: conns.filter(c => c.direction === 'in').length,
     outbound: conns.filter(c => c.direction === 'out').length,
     listening: new Set((snapshot?.listening || []).map(l => `${l.proto}|${l.port}`)).size,
-    neighbors: (snapshot?.neighbors || []).filter(x => scopeOf(x.ip) !== 'multicast').length,
+    // devices, not addresses: IPv4 and IPv6 entries of one MAC count once
+    neighbors: new Set((snapshot?.neighbors || []).filter(x => scopeOf(x.ip) !== 'multicast').map(x => x.mac || x.ip)).size,
     alerted: peers.filter(n => n.maxSev !== null).length,
     p1: peers.filter(n => n.maxSev === 1).length,
     processes: new Set(conns.map(c => c.process).filter(Boolean)).size,

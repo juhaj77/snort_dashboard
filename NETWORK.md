@@ -29,6 +29,7 @@ to be configured for the basic map. The optional tools below add more detail.
 - [Running the server natively on Windows](#running-the-server-natively-on-windows)
 - [Hostnames from the wire (tshark)](#hostnames-from-the-wire-tshark)
 - [Port scans and LAN discovery (nmap)](#port-scans-and-lan-discovery-nmap)
+- [One device, several addresses](#one-device-several-addresses)
 - [Signals: why a host is flagged](#signals-why-a-host-is-flagged)
 - [Settings](#settings)
 - [API](#api)
@@ -42,7 +43,7 @@ to be configured for the basic map. The optional tools below add more detail.
 | Feature | Linux / WSL side | Windows side | Required? |
 |---|---|---|---|
 | Connections and processes | `ss` (iproute2), or `netstat` (net-tools) | `netstat -ano` + `tasklist` (built in) | yes, at least one |
-| LAN neighbours (MAC addresses) | `ip neigh`, or `arp` (net-tools) | `arp -a` (built in) | no |
+| LAN neighbours (MAC addresses) | `ip neigh`, or `arp` (net-tools) | `arp -a` (IPv4) + `netsh interface ipv6 show neighbors` (IPv6), built in | no |
 | Default gateway | `ip route` | (taken from the Linux side) | no |
 | Traceroute | `traceroute` | `tracert` (built in) | no |
 | Port scan, LAN discovery | `nmap` | `nmap.exe` (Nmap for Windows) | no |
@@ -116,6 +117,9 @@ Requirements:
    WSL shares the Windows IP address and gateway, so traceroute and nmap from WSL see the same
    network as Windows. See [ENVIRONMENT.md § 3](ENVIRONMENT.md#3-prerequisites).
 
+IPv6 neighbours (your router's IPv6 address, phones, …) come from
+`netsh interface ipv6 show neighbors`, because `arp -a` lists only IPv4.
+
 Process names come from `tasklist`. Sockets owned by PID 0 are connections that are closing
 (`TIME_WAIT`), so they are shown as `(closing)`.
 
@@ -188,6 +192,23 @@ against your ISP's terms. Only scan your own devices. On a network you do not ma
 work or a dormitory, ask the administrator first.
 
 At most two traceroutes or scans run at a time.
+
+---
+
+## One device, several addresses
+
+A device usually has an IPv4 address, a global IPv6 address and a link-local `fe80::` address.
+The map shows them as **one host** when they belong together:
+
+- they have the same MAC address in the neighbour tables (`arp`, `ip neigh`, `netsh`), or
+- an IPv6 address has the MAC address built into it (EUI-64: `…:xxff:fexx:…`, as in
+  `fe80::6c14:8aff:feb2:d281` → MAC `6e:14:8a:b2:d2:81`).
+
+The host is named by its IPv4 address. The panel lists all addresses and all names (for
+example `dna.wlan`, `dna6.wlan`), and the alert and AppID counts are summed over the addresses.
+A router is marked as the gateway even when only its IPv6 address is talking. Phones often use
+a random ("private") MAC address per network. That still works, because the IPv4 and IPv6
+addresses share the same random MAC.
 
 ---
 
@@ -269,9 +290,9 @@ only from your own machine or a trusted network.
   10 seconds. Connections shorter than that can be missed. The hollow nodes ("seen by
   Snort/AppID") fill that gap for traffic Snort saw.
 - **Direction** is inferred: a connection whose local port is a listening port is *inbound*.
-- **Network labels** are based on the address. An ISP-assigned IPv6 address of your own router
-  (for example `2001:…::1`) is a public address and is labelled *Internet*, even though it is
-  the gateway.
+- **Network labels** are based on the address. IPv6 addresses in your home network are public
+  addresses, so an IPv6 address counts as *Local network* when its first 64 bits (the /64
+  prefix) are the same as one of this machine's addresses. Hosts in another /64 are *Internet*.
 - **UDP** shows only sockets that are connected to a peer. Most UDP traffic, such as DNS and QUIC,
   appears through Snort and AppID instead.
 - **No threat intelligence** yet. Alerts come from your Snort rules only.

@@ -96,7 +96,7 @@ const parseIpNeighJson = text => {
   try { list = JSON.parse(text) } catch (e) { return [] }
   if (!Array.isArray(list)) return []
   return list.filter(n => n && net.isIP(n.dst)).map(n => ({
-    ip: n.dst, mac: n.lladdr || null, iface: n.dev || null,
+    ip: n.dst, mac: normMac(n.lladdr) || null, iface: n.dev || null,
     state: Array.isArray(n.state) ? n.state.join(' ') : (n.state || null),
   }))
 }
@@ -118,6 +118,29 @@ const parseArp = text => {
   })
   // broadcast and multicast entries (01:00:5e… IPv4, 33:33… IPv6) are not devices
   return out.filter(n => n.mac !== BROADCAST_MAC && !/^(01:00:5e|33:33)/.test(n.mac || ''))
+}
+
+/**
+ * `netsh interface ipv6 show neighbors` (Windows IPv6 neighbour table; `arp -a` is IPv4 only).
+ * Headers are localised, so only rows of "address  mac  type" are read. Rows without a MAC
+ * (Unreachable) and multicast entries are skipped.
+ */
+const parseNetshNeighbors = text => {
+  const out = [], seen = new Set()
+  let iface = null
+  String(text || '').split(/\r?\n/).forEach(line => {
+    const head = line.match(/^\S.*?\s(\d+):\s*(.+?)\s*$/) // "Interface 17: Ethernet"
+    if (head && !line.includes('  ')) { iface = head[2]; return }
+    const row = line.trim().match(/^([0-9a-f:.%]+)\s+([0-9a-f]{2}(?:-[0-9a-f]{2}){5})\s*(.*)$/i)
+    if (!row) return
+    const ip = row[1].replace(/%.*$/, '')
+    const mac = normMac(row[2])
+    if (!net.isIPv6(ip) || /^ff/i.test(ip) || /^(33:33|00:00:00:00:00:00)/.test(mac) || mac === BROADCAST_MAC) return
+    if (seen.has(ip + mac)) return
+    seen.add(ip + mac)
+    out.push({ ip, mac, iface, state: row[3].trim() || null })
+  })
+  return out
 }
 
 /** `traceroute -n -q 1` / `tracert -d` → [{hop, ip, rtt: [ms...], lost}] */
@@ -192,5 +215,5 @@ const isLocalTarget = ip => {
 
 module.exports = {
   splitHostPort, isUnspecified, parseSs, parseNetstatLinux, parseNetstatWin, parseTasklist,
-  parseIpNeighJson, parseArp, parseTrace, parseNmapGrepable, parseTsharkNames, isLocalTarget,
+  parseIpNeighJson, parseArp, parseNetshNeighbors, parseTrace, parseNmapGrepable, parseTsharkNames, isLocalTarget,
 }

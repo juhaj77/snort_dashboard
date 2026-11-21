@@ -123,3 +123,23 @@ test('isLocalTarget only allows own-network addresses', () => {
   ;['8.8.8.8', '172.32.0.1', '224.0.0.1', '255.255.255.255', '2001:db8::1', 'x'].forEach(ip =>
     assert.strictEqual(P.isLocalTarget(ip), false, ip))
 })
+
+test('parseNetshNeighbors reads IPv6 neighbours and skips unreachable and multicast rows', () => {
+  const { parseNetshNeighbors } = require('../lib/net/parse')
+  const text = [
+    '', 'Interface 17: Ethernet', '', '',
+    'Internet Address                              Physical Address   Type',
+    '--------------------------------------------  -----------------  -----------',
+    '2001:14ba:b401:cc00::1                        44-d4-37-69-ad-d8  Reachable (Router)',
+    'fe80::46d4:37ff:fe69:add8                     44-d4-37-69-ad-d8  Reachable (Router)',
+    'fe80::6c14:8aff:feb2:d281                     Unreachable        Unreachable ',
+    'ff02::1                                       33-33-00-00-00-01  Permanent',
+    '', 'Interface 11: Ethernet 2', '',
+    'fe80::46d4:37ff:fe69:add8                     44-d4-37-69-ad-d8  Stale',
+  ].join('\r\n')
+  assert.deepStrictEqual(parseNetshNeighbors(text), [
+    { ip: '2001:14ba:b401:cc00::1', mac: '44:d4:37:69:ad:d8', iface: 'Ethernet', state: 'Reachable (Router)' },
+    { ip: 'fe80::46d4:37ff:fe69:add8', mac: '44:d4:37:69:ad:d8', iface: 'Ethernet', state: 'Reachable (Router)' },
+  ])
+  assert.deepStrictEqual(parseNetshNeighbors(''), [])
+})

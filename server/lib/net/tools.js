@@ -57,7 +57,7 @@ const tools = () => {
     },
     windows: (IS_WIN || IS_WSL) ? {
       netstat: winSys('netstat'), tasklist: winSys('tasklist'), arp: winSys('arp'), tracert: winSys('tracert'),
-      hostname: winSys('hostname'), ipconfig: winSys('ipconfig'),
+      hostname: winSys('hostname'), ipconfig: winSys('ipconfig'), netsh: winSys('netsh'),
       nmap: winProgram('Nmap\\nmap.exe'), tshark: winProgram('Wireshark\\tshark.exe'),
     } : null,
   }
@@ -101,18 +101,19 @@ const snapshot = async source => {
   if (source === 'windows') {
     const w = t.windows
     if (!w || !w.netstat) throw new Error('Windows tools are not reachable from here')
-    const [ns, tl, arp, hn, ad] = await Promise.all([
+    const [ns, tl, arp, hn, ad, nd] = await Promise.all([
       run(w.netstat, ['-ano']), w.tasklist ? run(w.tasklist, ['/fo', 'csv', '/nh']) : null,
       w.arp ? run(w.arp, ['-a']) : null, w.hostname ? run(w.hostname, []) : null, winAddrs(w),
+      w.netsh ? run(w.netsh, ['interface', 'ipv6', 'show', 'neighbors']).catch(() => null) : null,
     ])
     raw = P.parseNetstatWin(ns.stdout)
     const procs = tl ? P.parseTasklist(tl.stdout) : new Map()
     // pid 0 owns sockets that are closing (TIME_WAIT); no process is behind them any more
     raw.forEach(c => { c.process = c.pid === 0 ? '(closing)' : procs.get(c.pid) || null })
-    neighbors = arp ? P.parseArp(arp.stdout) : []
+    neighbors = [...(arp ? P.parseArp(arp.stdout) : []), ...(nd ? P.parseNetshNeighbors(nd.stdout) : [])]
     if (hn && hn.stdout.trim()) hostName = hn.stdout.trim()
     addrs = ad
-    via = ['netstat -ano', w.tasklist && 'tasklist', w.arp && 'arp -a'].filter(Boolean)
+    via = ['netstat -ano', w.tasklist && 'tasklist', w.arp && 'arp -a', nd && 'netsh ipv6 neighbors'].filter(Boolean)
   } else {
     const l = t.linux
     if (!l) throw new Error('Linux tools are not available here')

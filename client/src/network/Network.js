@@ -296,9 +296,12 @@ const Signals = ({ n, win }) => (
 const Details = ({ n, info, source, results, run, onClose, hist, win }) => {
   const [rdns, setRdns] = useState({})
   useEffect(() => {
-    if (!n || rdns[n.ip]) return
-    getJson('/network/rdns/' + encodeURIComponent(n.ip))
-      .then(r => setRdns(s => ({ ...s, [n.ip]: r.names || [] })), () => setRdns(s => ({ ...s, [n.ip]: [] })))
+    if (!n) return
+    n.addrs.filter(ip => !(ip in rdns)).slice(0, 4).forEach(ip => {
+      setRdns(s => (ip in s ? s : { ...s, [ip]: null }))
+      getJson('/network/rdns/' + encodeURIComponent(ip))
+        .then(r => setRdns(s => ({ ...s, [ip]: r.names || [] })), () => setRdns(s => ({ ...s, [ip]: [] })))
+    })
   }, [n, rdns])
   if (!n) {
     return <div className="nd nd-empty">
@@ -309,7 +312,7 @@ const Details = ({ n, info, source, results, run, onClose, hist, win }) => {
   const tr = results['trace|' + n.ip]
   const sc = results['scan|' + n.ip]
   const local = n.scope === 'lan' || n.scope === 'link-local' || n.scope === 'loopback'
-  const names = [...new Set([...n.names, ...(rdns[n.ip] || [])])]
+  const names = [...new Set([...n.names, ...n.addrs.flatMap(ip => rdns[ip] || [])])]
   const sigs = n.sigs
   return (
     <div className="nd">
@@ -320,7 +323,9 @@ const Details = ({ n, info, source, results, run, onClose, hist, win }) => {
       </div>
 
       <div className="nd-sec">Address</div>
-      <Row k="Names">{names.length ? names.slice(0, 4).map(x => <div key={x} className="mono">{x}</div>) : <span className="muted">{rdns[n.ip] ? 'none known' : 'looking up…'}</span>}</Row>
+      <Row k="Names">{names.length ? names.slice(0, 4).map(x => <div key={x} className="mono">{x}</div>) : <span className="muted">{n.addrs.every(ip => Array.isArray(rdns[ip])) ? 'none known' : 'looking up…'}</span>}</Row>
+      {n.addrs.length > 1 && <Row k="Addresses">{n.addrs.map(a => <div key={a} className="mono">{a}</div>)}
+        <div className="muted">one device: same MAC address</div></Row>}
       <Row k="Network">{SCOPE_LABEL[n.scope]}{n.gateway && <span className="tag tag-muted" style={{ marginLeft: 6 }}>default gateway</span>}</Row>
       {n.neighbor && <Row k="MAC"><span className="mono">{n.neighbor.mac || '—'}</span>{n.neighbor.state && <span className="muted"> · {n.neighbor.state}</span>}</Row>}
       <Row k="Status">{n.live ? `${n.conns.length} open connection${n.conns.length > 1 ? 's' : ''}` : 'no open connection now'}</Row>
@@ -390,6 +395,9 @@ const Details = ({ n, info, source, results, run, onClose, hist, win }) => {
 const SevBadges = ({ n }) => n.alertCount === 0 ? <span className="muted">—</span>
   : <span className="net-sev">{[1, 2, 3, 4, 0].filter(p => n.sev[p]).map(p => <span key={p}><PriorityBadge p={p} /> {fmtNum(n.sev[p])}</span>)}</span>
 
+const MoreAddrs = ({ n }) => n.addrs.length > 1
+  ? <span className="muted" title={n.addrs.slice(1).join('\n')}> +{n.addrs.length - 1}</span> : null
+
 const SignalTags = ({ n }) => n.signals.length === 0 ? <span className="muted">—</span>
   : <span className="sig-tags">{n.signals.map(x => <span key={x.id} className="sig-tag" style={{ '--sc': levelColor(x.level) }} title={x.detail}>{x.label}</span>)}</span>
 
@@ -404,7 +412,7 @@ const AttentionList = ({ peers, selected, onSelect, win }) => {
             <thead><tr><th>Address</th><th>Signals</th><th>Alerts ({win.short})</th><th>Name</th><th>Last in logs</th><th>Now</th></tr></thead>
             <tbody>{rows.slice(0, limit).map(n =>
               <tr key={n.ip} className={'row' + (n.ip === selected ? ' row-open' : '')} onClick={() => onSelect(n.ip)}>
-                <td className="mono"><span className="dot-sw" style={{ background: nodeColor(n) }} />{n.ip}</td>
+                <td className="mono"><span className="dot-sw" style={{ background: nodeColor(n) }} />{n.ip}<MoreAddrs n={n} /></td>
                 <td><SignalTags n={n} /></td>
                 <td><SevBadges n={n} /></td>
                 <td className="net-name">{n.name || <span className="muted">—</span>}</td>
@@ -435,7 +443,7 @@ const HostsTable = ({ peers, selected, onSelect, win }) => {
           <thead><tr><th>Address</th><th>Alerts ({win.short})</th><th>Name</th><th>Network</th><th>Process</th><th className="num">Conns</th><th>Ports</th><th>AppID</th></tr></thead>
           <tbody>{rows.slice(0, limit).map(n =>
             <tr key={n.ip} className={'row' + (n.ip === selected ? ' row-open' : '')} onClick={() => onSelect(n.ip)}>
-              <td className="mono"><span className="dot-sw" style={{ background: nodeColor(n) }} />{n.ip}</td>
+              <td className="mono"><span className="dot-sw" style={{ background: nodeColor(n) }} />{n.ip}<MoreAddrs n={n} /></td>
               <td><SevBadges n={n} /></td>
               <td className="net-name">{n.name || <span className="muted">—</span>}</td>
               <td>{SCOPE_LABEL[n.scope]}{n.gateway ? ' · gateway' : ''}</td>
