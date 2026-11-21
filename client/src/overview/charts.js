@@ -19,11 +19,21 @@ export const useWidth = () => {
   return [ref, width]
 }
 
-/** Tooltip positioned inside a relatively-positioned container, kept within its width. */
+/**
+ * Where to put a tooltip of width `w` next to the pointer at (x, y) inside a container
+ * `width` wide, without ever covering the pointer: right of it, else left of it, else
+ * (container too narrow for either) below it.
+ */
+export const tipPosition = (x, y, width, w, gap = 12) => {
+  if (x + gap + w <= width) return { left: x + gap, top: Math.max(0, y - 8) }
+  if (x - gap - w >= 0) return { left: x - gap - w, top: Math.max(0, y - 8) }
+  return { left: Math.max(0, Math.min(x - w / 2, width - w)), top: y + 18 }
+}
+
+/** Tooltip positioned inside a relatively-positioned container, beside the pointer. */
 export const Tip = ({ x, y, width, children }) => {
   const tipW = 220
-  const left = Math.max(0, Math.min(x + 12, width - tipW))
-  return <div className="viz-tip" style={{ left, top: Math.max(0, y - 8), width: tipW }}>{children}</div>
+  return <div className="viz-tip" style={{ ...tipPosition(x, y, width, tipW), width: tipW }}>{children}</div>
 }
 
 const niceMax = v => {

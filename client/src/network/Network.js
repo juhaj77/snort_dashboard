@@ -3,7 +3,7 @@ import { Panel, PriorityBadge, Status } from '../Panel'
 import { getJson } from '../api'
 import usePoll from '../usePoll'
 import { Section, Kpi } from '../overview/ui'
-import { useWidth } from '../overview/charts'
+import { useWidth, tipPosition } from '../overview/charts'
 import { fmtClock, fmtDateTime, fmtNum, fmtStep } from '../overview/format'
 import {
   GROUP_BY, RULES, SCOPE_LABEL, attention, attentionCount, buildPeers, layout, matches, nodeColor, nodeRadius,
@@ -174,9 +174,8 @@ const NetGraph = ({ host, peers, by, selected, onSelect, query, win }) => {
 const NodeTip = ({ p, x, y, width, win }) => {
   const n = p.n
   const w = 260
-  const left = Math.max(4, Math.min(x + 14, width - w - 4))
   return (
-    <div className="viz-tip net-tip" style={{ left, top: Math.max(4, y - 10), width: w }}>
+    <div className="viz-tip net-tip" style={{ ...tipPosition(x, y, width, w, 14), width: w }}>
       <div className="tip-msg mono">{n.ip}</div>
       {n.name && <div className="tip-head">{n.name}</div>}
       <div className="tip-row"><strong>{n.conns.length}</strong><span>open connections{n.inbound ? ` (${n.inbound} inbound)` : ''}</span></div>
