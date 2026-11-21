@@ -28,10 +28,10 @@ export const wiresharkFilter = (json) => {
 }
 
 /** Row + expandable details. Pass `open`/`onToggle` to control it from the parent. */
-const Alert = ({ json, open, onToggle }) => {
+const Alert = ({ json, open, onToggle, isNew }) => {
   const [own, setOwn] = useState(false)
   const showDetails = open === undefined ? own : open
-  const bg = 'prio prio-' + json.priority
+  const bg = 'prio prio-' + json.priority + (isNew ? ' row-new' : '')
   const filter = wiresharkFilter(json)
 
   const toggle = () => (onToggle ? onToggle() : setOwn(!own))

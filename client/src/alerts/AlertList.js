@@ -3,7 +3,6 @@ import Alert, { AlertHeader } from '../Alert'
 import { Status } from '../Panel'
 import { getJson } from '../api'
 
-const LIVE_MS = 5000
 const keyOf = e => `${e.timestamp}|${e.pkt_num ?? ''}|${e.rule ?? ''}`
 
 /** Case-insensitive text match on message, classification, rule and addresses. */
@@ -33,7 +32,7 @@ const sortBy = (list, sort) => {
   return [...list].sort((a, b) => (a[key] > b[key] ? dir : a[key] < b[key] ? -dir : 0))
 }
 
-const AlertTable = ({ alerts, onSort, openKey, onToggle }) =>
+const AlertTable = ({ alerts, onSort, openKey, onToggle, fresh }) =>
   <div className="table-wrap">
     <table className="grid">
       <AlertHeader onSort={onSort} />
@@ -41,7 +40,8 @@ const AlertTable = ({ alerts, onSort, openKey, onToggle }) =>
         {alerts.map((e, i) => {
           const key = keyOf(e) + '#' + i
           return onToggle
-            ? <Alert key={key} json={e} open={openKey === key} onToggle={() => onToggle(key)} />
+            ? <Alert key={key} json={e} open={openKey === key} onToggle={() => onToggle(key)}
+                     isNew={!!fresh && fresh.has(keyOf(e))} />
             : <Alert key={key} json={e} />
         })}
       </tbody>
@@ -66,23 +66,64 @@ export const TextFilter = ({ text, mode, onText, onMode }) =>
            value={text} onChange={e => onText(e.target.value)} />
   </div>
 
+// How often the live list moves. The server is asked at the same pace, but at least
+// every POLL_MS, so the counter of waiting alerts stays current with slow paces.
+// One /alerts call reads only the end of the file (~1 ms on the server), so 1 s is cheap.
+export const RATES = [
+  [1000, '1 s'],
+  [2000, '2 s'],
+  [5000, '5 s'],
+  [15000, '15 s'],
+  [30000, '30 s'],
+  [60000, '1 min'],
+  [0, 'manual'],
+]
+const POLL_MS = 5000
+const RATE_KEY = 'snort.alerts.liveRate'
+const loadRate = () => {
+  try {
+    const v = Number(window.localStorage.getItem(RATE_KEY))
+    return RATES.some(([r]) => r === v) && window.localStorage.getItem(RATE_KEY) !== null ? v : 5000
+  } catch (e) {
+    return 5000
+  }
+}
+const saveRate = v => { try { window.localStorage.setItem(RATE_KEY, String(v)) } catch (e) { /* private mode */ } }
+
 /**
- * The newest alerts, refreshed every 5 s. While a row is open the list is frozen
- * (fetching continues) so the row doesn't jump away; a counter shows what is waiting.
+ * The newest alerts. The list moves at the chosen pace (or only on demand); alerts that
+ * arrived with the last update are highlighted. While a row is open the list is frozen
+ * so the row doesn't jump away; a counter shows what is waiting.
  */
 export const LiveList = ({ text, mode, onStatus }) => {
   const [alertsArray, setAlertsArray] = useState([])
+  const [fresh, setFresh] = useState(() => new Set()) // keys that came with the last update
   const [error, setError] = useState(null)
   const [openKey, setOpenKey] = useState(null)
-  const [newCount, setNewCount] = useState(0)
+  const [waiting, setWaiting] = useState(0)
+  const [rate, setRateState] = useState(loadRate)
   const [sort, , onSort] = useSort()
   const timeoutId = useRef(0)
-  const paused = useRef(false)
-  const latest = useRef(null)
+  const open = useRef(false)        // details open
+  const rateRef = useRef(rate)
+  const lastApplied = useRef(0)     // when the list last moved
+  const latest = useRef(null)       // newest fetched list not shown yet
   const shown = useRef([])
   const openRef = useRef(null)
-  paused.current = openKey !== null
+  open.current = openKey !== null
+  rateRef.current = rate
   shown.current = alertsArray
+
+  const apply = useCallback(data => {
+    const before = new Set(shown.current.map(keyOf))
+    // nothing is "new" on the first load
+    setFresh(before.size ? new Set(data.map(keyOf).filter(k => !before.has(k))) : new Set())
+    setAlertsArray(data)
+    shown.current = data
+    latest.current = null
+    lastApplied.current = Date.now()
+    setWaiting(0)
+  }, [])
 
   const callServer = useRef(null)
   callServer.current = async () => {
@@ -91,19 +132,24 @@ export const LiveList = ({ text, mode, onStatus }) => {
       const data = (await getJson('/alerts')).reverse()
       if (!callServer.alive) return
       setError(null)
-      if (paused.current) {
+      const r = rateRef.current
+      // small slack so a poll that lands a moment early still counts as on time
+      const due = shown.current.length === 0 || (r > 0 && Date.now() - lastApplied.current >= r * 0.9)
+      if (!open.current && due) {
+        apply(data)
+      } else {
         latest.current = data
         const seen = new Set(shown.current.map(keyOf))
-        const fresh = data.filter(e => !seen.has(keyOf(e))).length
-        setNewCount(fresh >= data.length ? `${fresh}+` : fresh)
-      } else {
-        latest.current = null
-        setAlertsArray(data)
+        const n = data.filter(e => !seen.has(keyOf(e))).length
+        setWaiting(n >= data.length && shown.current.length ? `${n}+` : n)
       }
     } catch (e) {
       if (callServer.alive) setError(e)
     }
-    if (callServer.alive) timeoutId.current = setTimeout(() => callServer.current(), LIVE_MS)
+    if (callServer.alive) {
+      const r = rateRef.current
+      timeoutId.current = setTimeout(() => callServer.current(), r > 0 ? Math.min(r, POLL_MS) : POLL_MS)
+    }
   }
 
   useEffect(() => {
@@ -112,37 +158,66 @@ export const LiveList = ({ text, mode, onStatus }) => {
     return () => { callServer.alive = false; clearTimeout(timeoutId.current) }
   }, [])
 
+  const showNow = useCallback(() => {
+    if (latest.current) apply(latest.current)
+    else callServer.current()
+  }, [apply])
+
+  const setRate = v => {
+    setRateState(v)
+    rateRef.current = v
+    saveRate(v)
+    if (v > 0 && !open.current && latest.current) apply(latest.current)
+    // a faster pace takes effect now, not after the poll already scheduled
+    if (v > 0 && v < POLL_MS) callServer.current()
+  }
+
   const toggle = useCallback(key => {
-    if (paused.current && openRef.current === key) {
-      paused.current = false
+    if (open.current && openRef.current === key) {
+      open.current = false
       openRef.current = null
-      if (latest.current) setAlertsArray(latest.current)
-      latest.current = null
-      setNewCount(0)
       setOpenKey(null)
-      callServer.current()
+      // closing: catch up right away (unless updates are manual)
+      if (rateRef.current > 0) showNow()
     } else {
-      paused.current = true // before the next render, so a fetch in flight cannot move the row
+      open.current = true // before the next render, so a fetch in flight cannot move the row
       openRef.current = key
       setOpenKey(key)
     }
-  }, [])
+  }, [showNow])
 
+  const frozen = openKey !== null || rate === 0
   useEffect(() => {
-    onStatus(openKey !== null
-      ? <span className="paused" role="status" title="Updates are paused while an alert is open so the row stays put. Close it to see the latest alerts.">
-          <span className="paused-icon" aria-hidden="true" /> Paused{newCount ? ` · ${newCount} new` : ''}
+    onStatus(frozen
+      ? <span className="paused" role="status" title={openKey !== null
+          ? 'Updates are paused while an alert is open so the row stays put. Close it to see the latest alerts.'
+          : 'Manual updates: the list changes only when you click Show.'}>
+          <span className="paused-icon" aria-hidden="true" /> Paused{waiting ? ` · ${waiting} new` : ''}
         </span>
       : <span className="live live-on"><span className="dot" />live</span>)
-  }, [openKey, newCount, onStatus])
+  }, [frozen, openKey, waiting, onStatus])
 
   const rows = useMemo(() => sortBy(textFilter(alertsArray, text, mode), sort), [alertsArray, text, mode, sort])
   if (alertsArray.length === 0) return <Status error={error} />
   return <>
-    <div className="result-count muted">{rows.length} of the newest {alertsArray.length} alerts · newest first · refreshes every 5 s</div>
+    <div className="result-count live-bar">
+      <span className="muted">{rows.length} of the newest {alertsArray.length} alerts · newest first</span>
+      <label className="live-rate">
+        <span className="muted">Update</span>
+        <select className="input input-sm" value={rate} onChange={e => setRate(Number(e.target.value))}
+                aria-label="Update the list every">
+          {RATES.map(([v, label]) => <option key={v} value={v}>{v ? `every ${label}` : 'manually'}</option>)}
+        </select>
+      </label>
+      {waiting !== 0 && openKey === null &&
+        <button type="button" className="btn btn-sm" onClick={showNow} title="Show the waiting alerts now">
+          Show {waiting} new
+        </button>}
+      {fresh.size > 0 && <span className="muted"><i className="new-swatch" /> {fresh.size} new in the last update</span>}
+    </div>
     {rows.length === 0
       ? <div className="status">No alerts match the filter.</div>
-      : <AlertTable alerts={rows} onSort={onSort} openKey={openKey} onToggle={toggle} />}
+      : <AlertTable alerts={rows} onSort={onSort} openKey={openKey} onToggle={toggle} fresh={fresh} />}
   </>
 }
 

@@ -748,3 +748,15 @@ html, body { background: var(--bg); }
 .hm-future {
   fill: color-mix(in srgb, var(--bg) 60%, transparent); pointer-events: none;
 }
+
+/* live alert list: pace selector and highlight of the alerts that came with the last update */
+.live-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; }
+.live-rate { display: inline-flex; align-items: center; gap: 6px; }
+.input-sm { height: 24px; padding: 0 4px; font-size: 12px; }
+.btn-sm { height: 24px; padding: 0 10px; font-size: 12px; }
+.row-new td { background: color-mix(in srgb, var(--teal) 13%, transparent); }
+.row-new:hover td { background: var(--row-hover); }
+.new-swatch {
+  display: inline-block; width: 10px; height: 10px; border-radius: 2px; vertical-align: -1px;
+  background: color-mix(in srgb, var(--teal) 30%, transparent);
+}

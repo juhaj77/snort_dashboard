@@ -248,3 +248,59 @@ test('Alerts history search filters loaded alerts by text', async () => {
   expect(screen.getByText('3 of 6 alerts')).toBeInTheDocument()
   expect(screen.getAllByText('low thing').length).toBe(3)
 })
+
+test('Alerts live list moves at the chosen pace and highlights what is new', async () => {
+  jest.useFakeTimers();
+  window.localStorage.clear();
+  let batch = [alert(1)];
+  global.fetch = jest.fn(url => Promise.resolve({ ok: true, json: () => Promise.resolve(
+    url.includes('/alerts_stats') ? { since: 0, until: 3600, step: 300, bins: 12, total: 0, rules: [] } : [...batch]) }));
+  const { unmount } = render(<App />);
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Alerts' })); });
+  await screen.findByText(alert(1).timestamp);
+  fireEvent.change(screen.getByLabelText('Update the list every'), { target: { value: '0' } });
+  expect(screen.getByRole('status')).toHaveTextContent('Paused');
+  batch = [alert(1), alert(2)];
+  await act(async () => { jest.advanceTimersByTime(5100); });
+  expect(screen.queryByText(alert(2).timestamp)).toBeNull();       // manual: nothing moves
+  expect(screen.getByRole('status')).toHaveTextContent('Paused · 1 new');
+  fireEvent.click(screen.getByRole('button', { name: 'Show 1 new' }));
+  const row = screen.getByText(alert(2).timestamp).closest('tr');
+  expect(row).toHaveClass('row-new');
+  expect(screen.getByText(alert(1).timestamp).closest('tr')).not.toHaveClass('row-new');
+  expect(window.localStorage.getItem('snort.alerts.liveRate')).toBe('0'); // remembered
+
+  // every 30 s: polled every 5 s, but the rows wait for the pace
+  fireEvent.change(screen.getByLabelText('Update the list every'), { target: { value: '30000' } });
+  batch = [alert(1), alert(2), alert(3)];
+  await act(async () => { jest.advanceTimersByTime(5100); });
+  expect(screen.queryByText(alert(3).timestamp)).toBeNull();
+  expect(screen.getByRole('button', { name: 'Show 1 new' })).toBeInTheDocument();
+  await act(async () => { jest.advanceTimersByTime(30000); });
+  expect(screen.getByText(alert(3).timestamp).closest('tr')).toHaveClass('row-new');
+  unmount();
+  jest.useRealTimers();
+  window.localStorage.clear();
+});
+
+test('Alerts live list can update every second', async () => {
+  jest.useFakeTimers();
+  window.localStorage.clear();
+  let batch = [alert(1)];
+  global.fetch = jest.fn(url => Promise.resolve({ ok: true, json: () => Promise.resolve(
+    url.includes('/alerts_stats') ? { since: 0, until: 3600, step: 300, bins: 12, total: 0, rules: [] } : [...batch]) }));
+  const { unmount } = render(<App />);
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Alerts' })); });
+  await screen.findByText(alert(1).timestamp);
+  await act(async () => { fireEvent.change(screen.getByLabelText('Update the list every'), { target: { value: '1000' } }); });
+  batch = [alert(1), alert(2)];
+  await act(async () => { jest.advanceTimersByTime(1100); });
+  expect(screen.getByText(alert(2).timestamp).closest('tr')).toHaveClass('row-new');
+  const live = () => global.fetch.mock.calls.filter(c => /\/alerts$/.test(c[0])).length;
+  const before = live();
+  for (let i = 0; i < 3; i++) await act(async () => { jest.advanceTimersByTime(1000); });
+  expect(live() - before).toBe(3); // one request per second
+  unmount();
+  jest.useRealTimers();
+  window.localStorage.clear();
+});
