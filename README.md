@@ -4,7 +4,11 @@
 which hosts deserve a look and why, and how healthy the sensor itself is, using only the log
 files Snort already writes.**
 
-![Network view: a live connection map of every host this computer talks to, coloured by Snort alert severity, with flagged hosts and a details panel](/screenshots/l.png)
+<picture>
+  <!-- a still image for readers who prefer reduced motion -->
+  <source media="(prefers-reduced-motion: reduce)" srcset="screenshots/l.png">
+  <img src="screenshots/snort_dashboard_demo.gif" alt="Zooming the Network tab's live connection map: every host this computer talks to, coloured by Snort alert severity, with a tooltip showing a host's open connections, alerts and attention signals">
+</picture>
 
 Built with React and Node.js/Express for home labs, blue teams and anyone running Snort on Linux
 or on Windows through WSL2.
@@ -53,7 +57,7 @@ details panel with its addresses, ports, protocol, rule (gid:sid:rev) and a read
 
 ### Network: who your computer talks to, and which hosts need a look
 
-The view at the top of this page:
+![Network view: a live connection map of every host this computer talks to, coloured by Snort alert severity, with flagged hosts and a details panel](/screenshots/l.png)
 
 - **Connection map.** Your machine sits in the centre. Around it is every host it is connected
   to, plus every host Snort or AppID saw it talk to. Hosts are grouped by process, service or
