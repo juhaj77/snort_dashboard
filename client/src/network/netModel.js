@@ -1,6 +1,6 @@
 // Builds the connection graph: this machine in the centre, every remote address it talks
 // to (or that Snort / AppID saw it talk to) as a node, grouped by process, service or scope.
-// Pure functions; inputs are the server's /network/snapshot, normalised alerts and AppID lines.
+// Pure functions; inputs are the server's /network/snapshot and /network/history.
 
 export const PORT_NAMES = {
   20: 'FTP data', 21: 'FTP', 22: 'SSH', 23: 'Telnet', 25: 'SMTP', 53: 'DNS', 67: 'DHCP', 68: 'DHCP',
@@ -30,18 +30,19 @@ const topKey = map => [...map.entries()].sort((a, b) => b[1] - a[1] || String(a[
 
 const emptyNode = ip => ({
   ip, scope: scopeOf(ip), conns: [], processes: new Map(), remotePorts: new Map(),
-  inbound: 0, outbound: 0, names: new Set(), alerts: [], sev: { 1: 0, 2: 0, 3: 0, 4: 0, 0: 0 },
-  maxSev: null, appid: new Map(), appSessions: 0, neighbor: null, gateway: false, discovered: null,
+  inbound: 0, outbound: 0, names: new Set(),
+  alertCount: 0, sev: { 1: 0, 2: 0, 3: 0, 4: 0, 0: 0 }, sigs: [], sigCount: 0, alertHist: null,
+  maxSev: null, appid: new Map(), appSessions: 0, appHist: null, services: [],
+  neighbor: null, gateway: false, discovered: null, signals: [],
 })
 
 /**
  * @param snapshot  /network/snapshot response
- * @param alerts    normalised alerts (overview/aggregate normalizeAlert)
- * @param appid     raw appid.json lines
+ * @param hist      /network/history response: per-address alert and AppID counts for the window
  * @param opts      { seen: include peers only Snort/AppID saw, lan: include ARP neighbours,
  *                    loopback, discovered: nmap ping-sweep hosts }
  */
-export const buildPeers = (snapshot, alerts = [], appid = [], opts = {}) => {
+export const buildPeers = (snapshot, hist = null, opts = {}) => {
   const local = new Set((snapshot?.host?.addrs || []).map(a => a.ip))
   const isLocal = ip => !ip || local.has(ip) || UNSPEC.has(ip)
   const peers = new Map()
@@ -64,29 +65,26 @@ export const buildPeers = (snapshot, alerts = [], appid = [], opts = {}) => {
   })
   const live = new Set(peers.keys())
 
-  // the other side of alerts and AppID sessions
-  const others = (a, b) => [a, b].filter(ip => ip && !isLocal(ip))
-  ;(alerts || []).forEach(a => {
-    others(a.srcIp, a.dstIp).forEach(ip => {
-      if (!allowed(ip) || scopeOf(ip) === 'multicast') return
-      if (!live.has(ip) && !opts.seen) return
-      const n = get(ip)
-      n.alerts.push(a)
-      n.sev[a.priority] = (n.sev[a.priority] || 0) + 1
-    })
-  })
-  ;(appid || []).forEach(e => {
-    const c = e && e.client_info && e.client_info.ip, s = e && e.service_info && e.service_info.ip
-    if (!c || !s) return
-    const ip = isLocal(c) ? s : isLocal(s) ? c : null
-    if (!ip || !allowed(ip) || scopeOf(ip) === 'multicast') return
+  // what Snort and AppID logged about each other address during the window
+  Object.entries((hist && hist.hosts) || {}).forEach(([ip, h]) => {
+    if (isLocal(ip) || !allowed(ip) || scopeOf(ip) === 'multicast') return
     if (!live.has(ip) && !opts.seen) return
+    if (!h || (!h.alerts && !h.appid)) return
     const n = get(ip)
-    n.appSessions += 1
-    const app = e.apps && (e.apps.service || e.apps.client || e.apps.payload)
-    if (app) add(n.appid, app)
-    // TLS SNI and HTTP Host name the server side only
-    if (ip === s) { if (e.tls_host) n.names.add(e.tls_host); if (e.http && e.http.host) n.names.add(e.http.host) }
+    if (h.alerts) {
+      n.alertHist = h.alerts
+      n.alertCount = h.alerts.n || 0
+      n.sev = { 0: 0, 1: 0, 2: 0, 3: 0, 4: 0, ...h.alerts.sev }
+      n.sigs = h.alerts.sigs || []
+      n.sigCount = h.alerts.sigCount || n.sigs.length
+    }
+    if (h.appid) {
+      n.appHist = h.appid
+      n.appSessions = h.appid.n || 0
+      Object.entries(h.appid.apps || {}).forEach(([k, v]) => { if (k !== 'unknown') add(n.appid, k, v) })
+      ;(h.appid.names || []).forEach(x => n.names.add(x))
+      n.services = h.appid.services || []
+    }
   })
 
   const neigh = new Map((snapshot?.neighbors || []).map(x => [x.ip, x]))
@@ -100,22 +98,105 @@ export const buildPeers = (snapshot, alerts = [], appid = [], opts = {}) => {
     n.gateway = n.ip === gw
     ;(wire[n.ip] || []).forEach(x => n.names.add(x))
     const sevs = [1, 2, 3, 4].filter(p => n.sev[p])
-    n.maxSev = sevs.length ? sevs[0] : n.alerts.length ? 0 : null
+    n.maxSev = sevs.length ? sevs[0] : n.alertCount ? 0 : null
     n.live = n.conns.length > 0
     n.process = topKey(n.processes) || null
     n.port = topKey(n.remotePorts) ?? null
     n.app = topKey(n.appid) || null
     n.name = [...n.names][0] || (n.discovered && n.discovered.name) || null
-    n.weight = n.conns.length + n.alerts.length + Math.min(n.appSessions, 20) / 4
+    const seen = [n.alertHist, n.appHist].filter(Boolean)
+    n.firstSeen = seen.length ? Math.min(...seen.map(x => x.first)) : null
+    n.lastSeen = seen.length ? Math.max(...seen.map(x => x.last)) : null
+    n.weight = n.conns.length + Math.min(n.alertCount, 200) / 2 + Math.min(n.appSessions, 20) / 4
+    n.signals = signalsOf(n, hist)
   })
   return [...peers.values()]
 }
+
+// ---------------------------------------------------------------------------
+// Signals: why a host may need a look. Each is a plain rule over counts from the logs and the
+// connection snapshot, shown with its reason. There is deliberately no combined score.
+
+export const LEVELS = { high: 3, warn: 2, info: 1 }
+
+// ports where AppID's service name is expected; anything else is reported as unexpected
+const EXPECTED_PORTS = {
+  http: [80, 8080, 8000, 8008, 8081, 8888, 3128], ssh: [22], dns: [53, 5353], ftp: [21], telnet: [23],
+  smtp: [25, 465, 587], rdp: [3389], smb: [445, 139], netbios: [137, 138, 139], ntp: [123], imap: [143, 993],
+  pop3: [110, 995], ldap: [389, 636], snmp: [161, 162], mysql: [3306], postgresql: [5432], vnc: [5900, 5901],
+}
+// remote ports that are common for outbound traffic but missing from PORT_NAMES
+const COMMON_OUT = new Set([1194, 3479, 3480, 3481, 4070, 5223, 19302, 19305, 51820, 4500, 500])
+
+export const RULES = [
+  ['P1 / P2 alerts', 'Snort raised priority 1 (high) or 2 (medium) alerts involving the address in the window.'],
+  ['Alerts rising', 'At least 5 alerts in the last 10 minutes and at least 3 times the rate of the rest of the window (needs 20 min of earlier log).'],
+  ['Inbound from the internet', 'An open TCP connection that a public address made to a listening port of this machine.'],
+  ['Service on unexpected port', 'AppID named a service (HTTP, SSH, DNS, …) on a port that service does not normally use.'],
+  ['New', 'First appeared in the logs in the last 10 minutes, after at least 30 minutes of log without it.'],
+  ['Uncommon remote port', 'An open outbound connection to a public address on a port that is not a well-known service port.'],
+]
+
+const plural = (n, w) => `${n.toLocaleString('en-US')} ${w}${n === 1 ? '' : 's'}`
+
+export const signalsOf = (n, hist) => {
+  const out = []
+  const a = n.alertHist
+  if (a) {
+    const top = p => n.sigs.find(s => s.priority === p)
+    if (n.sev[1]) out.push({ id: 'p1', level: 'high', label: 'P1 alerts', detail: `${plural(n.sev[1], 'alert')}${top(1) ? ` · ${top(1).msg}` : ''}` })
+    if (n.sev[2]) out.push({ id: 'p2', level: 'warn', label: 'P2 alerts', detail: `${plural(n.sev[2], 'alert')}${top(2) ? ` · ${top(2).msg}` : ''}` })
+    // rate in the last 10 minutes vs the rest of the window the alert log covers
+    const recentWin = hist?.recent || 600
+    const logFrom = hist?.coverage?.alerts?.from ?? hist?.since
+    const earlierSpan = hist && logFrom !== null && logFrom !== undefined ? hist.until - recentWin - logFrom : 0
+    if (a.recent >= 5 && earlierSpan >= 1200) {
+      const before = ((a.n - a.recent) / earlierSpan) * recentWin // per 10 min
+      if (a.recent >= 3 * before) {
+        out.push({ id: 'rising', level: 'warn', label: 'Alerts rising', detail: `${plural(a.recent, 'alert')} in the last 10 min, ${before < 1 ? 'under 1' : '≈ ' + Math.round(before)} per 10 min before` })
+      }
+    }
+  }
+  // TCP only: every bound UDP socket looks like a listener, so UDP direction is a guess
+  const tcpIn = n.conns.filter(c => c.direction === 'in' && /^tcp/i.test(c.proto || ''))
+  if (tcpIn.length && n.scope === 'internet') {
+    const ports = [...new Set(tcpIn.map(c => c.localPort))].slice(0, 3).join(', ')
+    out.push({ id: 'inbound', level: 'warn', label: 'Inbound from the internet', detail: `${plural(tcpIn.length, 'TCP connection')} to local port ${ports}${n.process ? ` (${n.process})` : ''}` })
+  }
+  const odd = n.services.filter(s => { const exp = EXPECTED_PORTS[String(s.app).toLowerCase()]; return exp && !exp.includes(s.port) })
+  if (odd.length) {
+    out.push({ id: 'mismatch', level: 'warn', label: 'Service on unexpected port', detail: odd.slice(0, 3).map(s => `${s.app} on ${s.port}/${s.proto || '?'}`).join(', ') + ' (AppID)' })
+  }
+  if (hist && n.firstSeen !== null) {
+    const recentWin = hist.recent || 600
+    const froms = [hist.coverage?.alerts?.from, hist.coverage?.appid?.from].filter(x => x !== null && x !== undefined)
+    const logFrom = froms.length ? Math.min(...froms) : hist.since
+    if (n.firstSeen >= hist.until - recentWin && n.firstSeen - logFrom >= 1800) {
+      out.push({ id: 'new', level: 'info', label: 'New', detail: `first in the logs at ${clock(n.firstSeen)}` })
+    }
+  }
+  if (n.scope === 'internet' && n.outbound > 0) {
+    const ports = [...n.remotePorts.keys()].filter(p => p !== null && p !== undefined && !PORT_NAMES[p] && !COMMON_OUT.has(p))
+    if (ports.length) out.push({ id: 'port', level: 'info', label: 'Uncommon remote port', detail: `outbound to port ${ports.slice(0, 4).join(', ')}` })
+  }
+  return out
+}
+
+const clock = s => new Date(s * 1000).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
+
+export const topLevel = n => Math.max(0, ...n.signals.map(s => LEVELS[s.level]))
+export const attentionCount = n => n.signals.filter(s => s.level !== 'info').length
+
+/** Hosts with signals: most serious first, then the number of signals, then alert volume. */
+export const attention = peers => peers.filter(n => n.signals.length)
+  .sort((a, b) => topLevel(b) - topLevel(a) || attentionCount(b) - attentionCount(a) ||
+    b.signals.length - a.signals.length || b.alertCount - a.alertCount || a.ip.localeCompare(b.ip))
 
 export const GROUP_BY = [['process', 'Process'], ['service', 'Service'], ['scope', 'Network']]
 
 // hosts without an open connection, by what saw them
 const notConnected = n => (n.scope === 'lan' || n.scope === 'link-local' ? 'Local devices'
-  : n.alerts.length ? 'Snort alerts, not connected' : 'AppID only, not connected')
+  : n.alertCount ? 'Snort alerts, not connected' : 'AppID only, not connected')
 
 export const groupKey = (n, by) => {
   if (by === 'scope') return SCOPE_LABEL[n.scope] || n.scope
@@ -174,7 +255,7 @@ export const nodeColor = n =>
     : n.scope === 'lan' || n.scope === 'link-local' ? 'var(--blue)'
       : n.scope === 'loopback' ? 'var(--muted)' : 'var(--teal)'
 
-export const nodeRadius = n => 4 + Math.min(6, Math.log2(1 + n.conns.length + n.alerts.length / 4))
+export const nodeRadius = n => 4 + Math.min(6, Math.log2(1 + n.conns.length + Math.min(n.alertCount, 400) / 4))
 
 /** Text search over ip, names, process and AppID */
 export const matches = (n, q) => {
@@ -199,5 +280,7 @@ export const summary = (snapshot, peers) => {
     alerted: peers.filter(n => n.maxSev !== null).length,
     p1: peers.filter(n => n.maxSev === 1).length,
     processes: new Set(conns.map(c => c.process).filter(Boolean)).size,
+    attention: peers.filter(n => attentionCount(n) > 0).length,
+    attentionHigh: peers.filter(n => topLevel(n) === 3).length,
   }
 }

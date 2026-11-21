@@ -4,14 +4,22 @@ import { getJson } from '../api'
 import usePoll from '../usePoll'
 import { Section, Kpi } from '../overview/ui'
 import { useWidth } from '../overview/charts'
-import { normalizeAlerts } from '../overview/aggregate'
-import { fmtClock, fmtNum } from '../overview/format'
+import { fmtClock, fmtDateTime, fmtNum, fmtStep } from '../overview/format'
 import {
-  GROUP_BY, SCOPE_LABEL, buildPeers, layout, matches, nodeColor, nodeRadius, portLabel, summary,
+  GROUP_BY, RULES, SCOPE_LABEL, attention, attentionCount, buildPeers, layout, matches, nodeColor, nodeRadius,
+  portLabel, summary, topLevel,
 } from './netModel'
 
-const ALERT_WINDOW = 3600
 const GRAPH_H = 620
+// time window for the Snort and AppID history (the connection list is always "now")
+const WINDOWS = [[3600, '1 h', 'last hour'], [21600, '6 h', 'last 6 hours'], [86400, '24 h', 'last 24 hours']]
+const WINDOW_KEY = 'net.window'
+const initialWindow = () => {
+  try { const v = Number(localStorage.getItem(WINDOW_KEY)); if (WINDOWS.some(w => w[0] === v)) return v } catch (e) { /* storage off */ }
+  return 3600
+}
+const winLabel = w => (WINDOWS.find(x => x[0] === w) || WINDOWS[0])
+const levelColor = l => (l === 'high' ? 'var(--p1)' : l === 'warn' ? 'var(--amber)' : 'var(--purple)')
 
 // ---------------------------------------------------------------------------
 // Graph
@@ -21,7 +29,7 @@ const shortName = n => {
   return name.length > 26 ? name.slice(0, 24) + '…' : name
 }
 
-const NetGraph = ({ host, peers, by, selected, onSelect, query }) => {
+const NetGraph = ({ host, peers, by, selected, onSelect, query, win }) => {
   const [wrapRef, width] = useWidth()
   const svgRef = useRef(null)
   const L = useMemo(() => layout(peers, by), [peers, by])
@@ -86,7 +94,7 @@ const NetGraph = ({ host, peers, by, selected, onSelect, query }) => {
 
   const labelFor = p => {
     const show = p.n.ip === selected || p.n.ip === hover?.n.ip || (query.trim() && matches(p.n, query)) ||
-      (v.k > 1.4) || (L.nodes.length <= 24) || p.n.maxSev === 1 || p.n.gateway
+      (v.k > 1.4) || (L.nodes.length <= 24) || topLevel(p.n) === 3 || p.n.gateway
     if (!show) return null
     const right = Math.cos(p.a) >= 0
     const r = nodeRadius(p.n) * Math.min(1.6, Math.max(0.8, v.k)) + 4
@@ -135,9 +143,14 @@ const NetGraph = ({ host, peers, by, selected, onSelect, query }) => {
                     onClick={() => onSelect(on ? null : n.ip)}>
             <circle cx={sx(p.x)} cy={sy(p.y)} r={r + 7} className="net-hit" />
             {n.inbound > 0 && <circle cx={sx(p.x)} cy={sy(p.y)} r={r + 3} className="net-in" />}
+            {n.signals.some(x => x.id === 'new') && <circle cx={sx(p.x)} cy={sy(p.y)} r={r + 6} className="net-new" />}
             <circle cx={sx(p.x)} cy={sy(p.y)} r={r}
                     style={n.live || n.neighbor ? { fill: color } : { fill: 'var(--surface)', stroke: color, strokeWidth: 1.5 }}
                     className={'net-dot' + (on ? ' net-dot-on' : '')} />
+            {attentionCount(n) > 0 && <g className="net-badge" transform={`translate(${sx(p.x) + r * 0.8 + 3} ${sy(p.y) - r * 0.8 - 3})`}>
+              <circle r={6.5} style={{ fill: topLevel(n) === 3 ? 'var(--p1)' : 'var(--amber)' }} />
+              <text y={3} textAnchor="middle">{attentionCount(n)}</text>
+            </g>}
           </g>
         })}
         {L.nodes.map(p => <React.Fragment key={'l' + p.n.ip}>{labelFor(p)}</React.Fragment>)}
@@ -147,7 +160,7 @@ const NetGraph = ({ host, peers, by, selected, onSelect, query }) => {
           <text x={sx(0)} y={sy(0) + 30} textAnchor="middle">{host || 'this machine'}</text>
         </g>
       </svg>
-      {hover && !drag.current && <NodeTip p={hover} x={sx(hover.x)} y={sy(hover.y)} width={width} />}
+      {hover && !drag.current && <NodeTip p={hover} x={sx(hover.x)} y={sy(hover.y)} width={width} win={win} />}
       <div className="net-zoom">
         <button type="button" className="btn" aria-label="Zoom in" onClick={() => setView(c => ({ ...(c || fit), k: Math.min(6, (c || fit).k * 1.3) }))}>+</button>
         <button type="button" className="btn" aria-label="Zoom out" onClick={() => setView(c => ({ ...(c || fit), k: Math.max(0.15, (c || fit).k / 1.3) }))}>−</button>
@@ -158,7 +171,7 @@ const NetGraph = ({ host, peers, by, selected, onSelect, query }) => {
   )
 }
 
-const NodeTip = ({ p, x, y, width }) => {
+const NodeTip = ({ p, x, y, width, win }) => {
   const n = p.n
   const w = 260
   const left = Math.max(4, Math.min(x + 14, width - w - 4))
@@ -169,8 +182,9 @@ const NodeTip = ({ p, x, y, width }) => {
       <div className="tip-row"><strong>{n.conns.length}</strong><span>open connections{n.inbound ? ` (${n.inbound} inbound)` : ''}</span></div>
       {n.process && <div className="tip-row"><strong /><span>{[...n.processes.keys()].slice(0, 3).join(', ')}</span></div>}
       {n.port !== null && <div className="tip-row"><strong /><span>port {portLabel(n.port)}</span></div>}
-      {n.alerts.length > 0 && <div className="tip-row"><strong>{n.alerts.length}</strong><span>Snort alerts (1 h)</span></div>}
+      {n.alertCount > 0 && <div className="tip-row"><strong>{fmtNum(n.alertCount)}</strong><span>Snort alerts ({win})</span></div>}
       {n.app && <div className="tip-row"><strong /><span>AppID: {[...n.appid.keys()].slice(0, 3).join(', ')}</span></div>}
+      {n.signals.map(x => <div key={x.id} className="tip-row"><strong><i className="swatch" style={{ background: levelColor(x.level) }} /></strong><span>{x.label}</span></div>)}
       <div className="tip-foot">{SCOPE_LABEL[n.scope]}{n.live ? '' : ' · no open connection'} · click for details</div>
     </div>
   )
@@ -187,6 +201,8 @@ const Legend = () =>
     <span><i className="sw sw-hollow" />seen by Snort/AppID, no open connection</span>
     <span><i className="sw sw-ring" />inbound connection</span>
     <span><i className="sw sw-hub" />group</span>
+    <span><i className="sw-badge" style={{ background: 'var(--p1)' }}>1</i><i className="sw-badge" style={{ background: 'var(--amber)' }}>2</i>signals to check (see Needs attention)</span>
+    <span><i className="sw sw-new" />new in the logs</span>
     <span className="muted">size = connections + alerts · scroll to zoom, drag to pan</span>
   </div>
 
@@ -234,7 +250,50 @@ const ScanResult = ({ r }) => {
   )
 }
 
-const Details = ({ n, info, source, results, run, onClose }) => {
+// Count per time bin over the window, one small bar chart per measure
+const Activity = ({ title, h, hist, unit }) => {
+  const [ref, width] = useWidth()
+  const [hover, setHover] = useState(null)
+  const H = 34
+  const bins = (h && h.bins) || []
+  const n = bins.length || hist.bins
+  const band = width / n
+  const bw = Math.max(1, band - 2) // 2px surface gap between bars
+  const max = Math.max(1, ...bins)
+  const t0 = i => hist.since + i * hist.step
+  const total = bins.reduce((a, b) => a + b, 0)
+  return (
+    <div className="nd-act">
+      <div className="nd-act-head"><span>{title}</span>
+        <span className="muted">{hover !== null ? `${fmtClock(t0(hover), false)}–${fmtClock(t0(hover + 1), false)} · ${fmtNum(bins[hover] || 0)} ${unit}` : `${fmtNum(total)} · max ${fmtNum(max === 1 && !total ? 0 : max)} per ${fmtStep(Math.round(hist.step / 60) * 60)}`}</span></div>
+      <div ref={ref} className="nd-act-plot" onMouseLeave={() => setHover(null)}>
+        {width > 0 && <svg width={width} height={H} role="img" aria-label={`${title}: ${total} in the window`}>
+          <line x1={0} x2={width} y1={H - 0.5} y2={H - 0.5} className="viz-base" />
+          {bins.map((v, i) => {
+            const bh = v ? Math.max(2, (v / max) * (H - 2)) : 0
+            return <g key={i} onMouseEnter={() => setHover(i)}>
+              <rect x={i * band} y={0} width={band} height={H} fill="transparent" />
+              {bh > 0 && <rect x={i * band + 1} y={H - bh} width={bw} height={bh} rx={Math.min(2, bw / 2)} className={hover === i ? 'nd-act-bar on' : 'nd-act-bar'} />}
+            </g>
+          })}
+        </svg>}
+      </div>
+    </div>
+  )
+}
+
+const Signals = ({ n, win }) => (
+  <>
+    <div className="nd-sec">Why look at this host</div>
+    {n.signals.length === 0 ? <div className="muted">Nothing flagged by the rules below in the {win}.</div> :
+      <ul className="nd-signals">{n.signals.map(x => <li key={x.id}>
+        <span className="sig-tag" style={{ '--sc': levelColor(x.level) }}>{x.label}</span>
+        <span>{x.detail}</span>
+      </li>)}</ul>}
+  </>
+)
+
+const Details = ({ n, info, source, results, run, onClose, hist, win }) => {
   const [rdns, setRdns] = useState({})
   useEffect(() => {
     if (!n || rdns[n.ip]) return
@@ -251,15 +310,7 @@ const Details = ({ n, info, source, results, run, onClose }) => {
   const sc = results['scan|' + n.ip]
   const local = n.scope === 'lan' || n.scope === 'link-local' || n.scope === 'loopback'
   const names = [...new Set([...n.names, ...(rdns[n.ip] || [])])]
-  // one line per signature: most severe first, then most frequent
-  const bySig = new Map()
-  n.alerts.forEach(a => {
-    const key = a.rule || a.msg
-    const g = bySig.get(key) || { key, msg: a.msg || a.rule, priority: a.priority, count: 0, last: 0 }
-    g.count += 1; g.last = Math.max(g.last, a.seconds)
-    bySig.set(key, g)
-  })
-  const sigs = [...bySig.values()].sort((a, b) => (a.priority || 5) - (b.priority || 5) || b.count - a.count)
+  const sigs = n.sigs
   return (
     <div className="nd">
       <div className="nd-head">
@@ -273,6 +324,16 @@ const Details = ({ n, info, source, results, run, onClose }) => {
       <Row k="Network">{SCOPE_LABEL[n.scope]}{n.gateway && <span className="tag tag-muted" style={{ marginLeft: 6 }}>default gateway</span>}</Row>
       {n.neighbor && <Row k="MAC"><span className="mono">{n.neighbor.mac || '—'}</span>{n.neighbor.state && <span className="muted"> · {n.neighbor.state}</span>}</Row>}
       <Row k="Status">{n.live ? `${n.conns.length} open connection${n.conns.length > 1 ? 's' : ''}` : 'no open connection now'}</Row>
+      <Row k="In logs">{n.firstSeen === null ? <span className="muted">not in the Snort / AppID logs in the {win.long}</span>
+        : <>{hist && n.firstSeen - hist.since < hist.step ? `from the start of the ${win.long}` : `first ${fmtDateTime(n.firstSeen)}`}<br />last {fmtDateTime(n.lastSeen)}</>}</Row>
+
+      <Signals n={n} win={win.long} />
+
+      {hist && (n.alertHist || n.appHist) && <>
+        <div className="nd-sec">Activity · {win.long}</div>
+        <Activity title="Snort alerts" unit="alerts" h={n.alertHist} hist={hist} />
+        <Activity title="AppID sessions" unit="sessions" h={n.appHist} hist={hist} />
+      </>}
 
       {n.conns.length > 0 && <>
         <div className="nd-sec">Connections</div>
@@ -289,19 +350,21 @@ const Details = ({ n, info, source, results, run, onClose }) => {
         {n.conns.length > 30 && <div className="card-note">and {n.conns.length - 30} more</div>}
       </>}
 
-      <div className="nd-sec">Snort alerts · last hour</div>
-      {n.alerts.length === 0 ? <div className="muted">None.</div> : <>
+      <div className="nd-sec">Snort alerts · {win.long}</div>
+      {n.alertCount === 0 ? <div className="muted">None.</div> : <>
         <div className="nd-sev">{[1, 2, 3, 4, 0].filter(p => n.sev[p]).map(p => <span key={p}><PriorityBadge p={p} /> {fmtNum(n.sev[p])}</span>)}</div>
-        <ul className="nd-alerts">{sigs.slice(0, 6).map(g => <li key={g.key}>
+        <ul className="nd-alerts">{sigs.slice(0, 6).map(g => <li key={g.msg}>
           <PriorityBadge p={g.priority} /> {g.msg} <span className="muted">×{fmtNum(g.count)} · last {fmtClock(g.last)}</span>
         </li>)}</ul>
-        {sigs.length > 6 && <div className="card-note">and {sigs.length - 6} more signatures; see Overview or Search.</div>}
+        {n.sigCount > 6 && <div className="card-note">and {n.sigCount - 6} more signatures; see Overview or Search.</div>}
       </>}
 
       {(n.appSessions > 0) && <>
         <div className="nd-sec">AppID</div>
         <Row k="Sessions">{fmtNum(n.appSessions)}</Row>
-        {n.appid.size > 0 && <Row k="Apps">{[...n.appid.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6).map(([k, c]) => <div key={k}>{k} <span className="muted">×{c}</span></div>)}</Row>}
+        <Row k="Apps">{n.appid.size > 0 ? [...n.appid.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6).map(([k, c]) => <div key={k}>{k} <span className="muted">×{c}</span></div>)
+          : <span className="muted">not identified (AppID reported "unknown")</span>}</Row>
+        {n.services.length > 0 && <Row k="Offers">{n.services.slice(0, 6).map(x => <div key={x.app + x.port + x.proto}>{x.app} <span className="mono">{x.port}/{x.proto}</span> <span className="muted">×{x.count}</span></div>)}</Row>}
       </>}
 
       <div className="nd-sec">Investigate</div>
@@ -324,10 +387,44 @@ const Details = ({ n, info, source, results, run, onClose }) => {
 // ---------------------------------------------------------------------------
 // Tables
 
-const SevBadges = ({ n }) => n.alerts.length === 0 ? <span className="muted">—</span>
+const SevBadges = ({ n }) => n.alertCount === 0 ? <span className="muted">—</span>
   : <span className="net-sev">{[1, 2, 3, 4, 0].filter(p => n.sev[p]).map(p => <span key={p}><PriorityBadge p={p} /> {fmtNum(n.sev[p])}</span>)}</span>
 
-const HostsTable = ({ peers, selected, onSelect }) => {
+const SignalTags = ({ n }) => n.signals.length === 0 ? <span className="muted">—</span>
+  : <span className="sig-tags">{n.signals.map(x => <span key={x.id} className="sig-tag" style={{ '--sc': levelColor(x.level) }} title={x.detail}>{x.label}</span>)}</span>
+
+const AttentionList = ({ peers, selected, onSelect, win }) => {
+  const [limit, setLimit] = useState(10)
+  const rows = useMemo(() => attention(peers), [peers])
+  return (
+    <>
+      {rows.length === 0 ? <div className="muted">No host matches the rules below in the {win.long}.</div> :
+        <div className="table-wrap">
+          <table className="grid">
+            <thead><tr><th>Address</th><th>Signals</th><th>Alerts ({win.short})</th><th>Name</th><th>Last in logs</th><th>Now</th></tr></thead>
+            <tbody>{rows.slice(0, limit).map(n =>
+              <tr key={n.ip} className={'row' + (n.ip === selected ? ' row-open' : '')} onClick={() => onSelect(n.ip)}>
+                <td className="mono"><span className="dot-sw" style={{ background: nodeColor(n) }} />{n.ip}</td>
+                <td><SignalTags n={n} /></td>
+                <td><SevBadges n={n} /></td>
+                <td className="net-name">{n.name || <span className="muted">—</span>}</td>
+                <td className="muted">{n.lastSeen ? fmtClock(n.lastSeen) : '—'}</td>
+                <td>{n.live ? `${n.conns.length} conn${n.process ? ' · ' + n.process : ''}` : <span className="muted">not connected</span>}</td>
+              </tr>)}
+            </tbody>
+          </table>
+        </div>}
+      {rows.length > limit && <button type="button" className="btn" style={{ marginTop: 8 }} onClick={() => setLimit(limit + 20)}>Show more ({rows.length - limit})</button>}
+      <details className="net-rules">
+        <summary>How hosts are flagged</summary>
+        <p>Each signal is one rule over the Snort and AppID logs of the selected window and the current connection list. Hosts are listed by their most serious signal, then by how many they have. There is no combined risk score: the reasons are shown as they are.</p>
+        <ul>{RULES.map(([k, d]) => <li key={k}><strong>{k}</strong>: {d}</li>)}</ul>
+      </details>
+    </>
+  )
+}
+
+const HostsTable = ({ peers, selected, onSelect, win }) => {
   const [limit, setLimit] = useState(50)
   const rows = [...peers].sort((a, b) =>
     (a.maxSev === null ? 9 : a.maxSev || 5) - (b.maxSev === null ? 9 : b.maxSev || 5) || b.weight - a.weight || a.ip.localeCompare(b.ip))
@@ -335,7 +432,7 @@ const HostsTable = ({ peers, selected, onSelect }) => {
     <>
       <div className="table-wrap">
         <table className="grid">
-          <thead><tr><th>Address</th><th>Alerts (1 h)</th><th>Name</th><th>Network</th><th>Process</th><th className="num">Conns</th><th>Ports</th><th>AppID</th></tr></thead>
+          <thead><tr><th>Address</th><th>Alerts ({win.short})</th><th>Name</th><th>Network</th><th>Process</th><th className="num">Conns</th><th>Ports</th><th>AppID</th></tr></thead>
           <tbody>{rows.slice(0, limit).map(n =>
             <tr key={n.ip} className={'row' + (n.ip === selected ? ' row-open' : '')} onClick={() => onSelect(n.ip)}>
               <td className="mono"><span className="dot-sw" style={{ background: nodeColor(n) }} />{n.ip}</td>
@@ -394,22 +491,23 @@ function Network() {
   const [selected, setSelected] = useState(null)
   const [results, setResults] = useState({})
   const [discovered, setDiscovered] = useState(null)
+  const [windowS, setWindowS] = useState(initialWindow)
+  const pickWindow = w => { setWindowS(w); try { localStorage.setItem(WINDOW_KEY, String(w)) } catch (e) { /* storage off */ } }
+  const [, short, long] = winLabel(windowS)
+  const win = { short, long }
 
   useEffect(() => {
     getJson('/network').then(i => { setInfo(i); setSource(s => s || (i.sources[0] && i.sources[0].id)) }, e => setInfo({ error: e }))
   }, [])
 
   const [snap, reloadSnap] = usePoll(() => ({ path: `/network/snapshot?source=${source || ''}` }), auto ? 10000 : 3600000, `${source}|${auto}`)
-  const [alertsState] = usePoll(() => ({ path: `/alerts_all/5001?since=${Math.floor(Date.now() / 1000) - ALERT_WINDOW}` }), 30000, 'alerts')
-  const [appidState] = usePoll(() => ({ path: '/appid/3000' }), 30000, 'appid')
-
-  const alerts = useMemo(() => {
-    const since = Date.now() / 1000 - ALERT_WINDOW
-    return normalizeAlerts(Array.isArray(alertsState.data) ? alertsState.data : []).alerts.filter(a => a.seconds >= since)
-  }, [alertsState.data])
+  const [histState] = usePoll(() => ({ path: `/network/history?window=${windowS}` }), windowS > 3600 ? 60000 : 30000, `hist|${windowS}`)
+  // keep showing the previous window's data until the new one arrives
+  const hist = histState.data && histState.data.hosts && histState.data.window === windowS ? histState.data : null
   const snapshot = snap.data && !snap.data.error ? snap.data : null
-  const peers = useMemo(() => buildPeers(snapshot, alerts, Array.isArray(appidState.data) ? appidState.data : [],
-    { ...opts, discovered: discovered && discovered.hosts }), [snapshot, alerts, appidState.data, opts, discovered])
+  const peers = useMemo(() => buildPeers(snapshot, hist,
+    { ...opts, discovered: discovered && discovered.hosts }), [snapshot, hist, opts, discovered])
+  const cover = hist && hist.coverage
   const s = summary(snapshot, peers)
   const node = peers.find(n => n.ip === selected) || null
 
@@ -437,7 +535,10 @@ function Network() {
         <div className="seg" role="group" aria-label="Group by">
           {GROUP_BY.map(([id, label]) => <button key={id} type="button" className={by === id ? 'seg-on' : ''} onClick={() => setBy(id)}>{label}</button>)}
         </div>
-        <label className="net-check"><input type="checkbox" checked={opts.seen} onChange={() => toggle('seen')} /> Snort/AppID peers (1 h)</label>
+        <div className="seg" role="group" aria-label="Log window">
+          {WINDOWS.map(([w, l, d]) => <button key={w} type="button" title={`Snort and AppID logs of the ${d}`} className={windowS === w ? 'seg-on' : ''} onClick={() => pickWindow(w)}>{l}</button>)}
+        </div>
+        <label className="net-check"><input type="checkbox" checked={opts.seen} onChange={() => toggle('seen')} /> Snort/AppID peers</label>
         <label className="net-check"><input type="checkbox" checked={opts.lan} onChange={() => toggle('lan')} /> LAN devices</label>
         <label className="net-check"><input type="checkbox" checked={opts.loopback} onChange={() => toggle('loopback')} /> loopback</label>
         <input className="input" placeholder="find IP, name, process" value={query} onChange={e => setQuery(e.target.value)} />
@@ -452,6 +553,11 @@ function Network() {
       </div>
 
       {snap.error && <Status error={snap.error} />}
+      {histState.error && <div className="warn">Snort / AppID history: {String(histState.error.message || histState.error)}</div>}
+      {!hist && !histState.error && <div className="muted">Reading the Snort and AppID logs of the {long}…</div>}
+      {cover && [['Snort alert log', cover.alerts], ['AppID log', cover.appid]].map(([k, c]) =>
+        c.from !== null && c.from > hist.since + 60 &&
+        <div key={k} className="muted">{k} starts at {fmtDateTime(c.from)} (Snort restart or log rotation), so it covers only part of the {long}.</div>)}
       {discovered && discovered.error && <div className="warn">LAN discovery: {discovered.error}</div>}
       {discovered && discovered.hosts && <div className="muted">LAN discovery found {discovered.hosts.length} devices in {discovered.networks.join(', ')}.</div>}
 
@@ -461,23 +567,27 @@ function Network() {
           <Kpi label="Connections" value={fmtNum(s.connections)} sub={`${s.outbound} out · ${s.inbound} in`} />
           <Kpi label="Listening ports" value={fmtNum(s.listening)} sub="services this machine offers" />
           <Kpi label="LAN neighbours" value={fmtNum(s.neighbors)} sub="ARP / neighbour table" />
-          <Kpi label="Hosts with alerts" value={fmtNum(s.alerted)} sub={s.p1 ? `⚠ ${s.p1} with P1 · last hour` : 'last hour'} status={s.p1 ? 'warn' : undefined} />
-          <Kpi label="Processes" value={fmtNum(s.processes)} sub="with network connections" />
+          <Kpi label="Hosts with alerts" value={fmtNum(s.alerted)} sub={s.p1 ? `⚠ ${s.p1} with P1 · ${long}` : long} status={s.p1 ? 'warn' : undefined} />
+          <Kpi label="Need attention" value={fmtNum(s.attention)} sub={`flagged by the rules · ${short}`} status={s.attentionHigh ? 'warn' : undefined} />
         </div>
 
         <div className="net-main">
           <Section title="Connection map" note={`${snapshot.host.name} · ${peers.length} hosts · via ${snapshot.via.join(', ')}`} className="net-card">
-            <NetGraph host={snapshot.host.name} peers={peers} by={by} selected={selected} onSelect={setSelected} query={query} />
+            <NetGraph host={snapshot.host.name} peers={peers} by={by} selected={selected} onSelect={setSelected} query={query} win={short} />
             <Legend />
           </Section>
           <Section title="Host details" className="net-side">
-            <Details n={node} info={info} source={source} results={results} run={run} onClose={() => setSelected(null)} />
+            <Details n={node} info={info} source={source} results={results} run={run} onClose={() => setSelected(null)} hist={hist} win={win} />
           </Section>
         </div>
 
+        <Section title="Needs attention" note={`hosts flagged by the rules below · ${long} · click a row to select`}>
+          <AttentionList peers={peers} selected={selected} onSelect={setSelected} win={win} />
+        </Section>
+
         <div className="net-tables">
           <Section title="Hosts" note="alerted first, then by activity · click a row to select">
-            <HostsTable peers={peers} selected={selected} onSelect={setSelected} />
+            <HostsTable peers={peers} selected={selected} onSelect={setSelected} win={win} />
           </Section>
           <Section title="Listening ports" note="who can connect to this machine">
             <ListeningTable listening={snapshot.listening} />

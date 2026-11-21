@@ -1,6 +1,7 @@
 const fs = require('fs')
 
 const CHUNK = 64 * 1024
+const BACK_CHUNK = 256 * 1024
 
 /**
  * Read lines from the end of a file without loading the whole file.
@@ -93,4 +94,43 @@ const parseJsonLines = lines =>
     return out
   }, [])
 
-module.exports = { readTail, lastLines, linesSince, parseJsonLines }
+/**
+ * Complete lines from the end of the file down to byte `stopAt`, newest first, via callback.
+ * `onLine` returning false stops the read. Lines are split on bytes, so a multi-byte UTF-8
+ * character is never cut at a chunk boundary.
+ */
+const eachLineBackwards = async (file, size, stopAt, onLine) => {
+  const fh = await fs.promises.open(file, 'r')
+  try {
+    let pos = size, carry = Buffer.alloc(0)
+    while (pos > stopAt) {
+      const len = Math.min(BACK_CHUNK, pos - stopAt)
+      pos -= len
+      const buf = Buffer.alloc(len)
+      await fh.read(buf, 0, len, pos)
+      const data = carry.length ? Buffer.concat([buf, carry]) : buf
+      const atStart = pos <= stopAt
+      // bytes before the first newline belong to a line that continues in the previous chunk
+      const first = atStart ? -1 : data.indexOf(10)
+      if (!atStart && first === -1) { carry = data; continue }
+      let end = data.length
+      while (end > first) {
+        // note: lastIndexOf with a negative offset counts from the end, so never pass one
+        const nl = end > 0 ? data.lastIndexOf(10, end - 1) : -1
+        const lineStart = nl + 1 // 0 when there is no newline before `end`
+        if (!atStart && nl < first) break
+        const line = data.toString('utf8', lineStart, end).replace(/\r$/, '')
+        if (line.trim() !== '' && onLine(line) === false) return
+        if (nl < 0) break
+        end = nl
+      }
+      carry = atStart ? Buffer.alloc(0) : data.subarray(0, first)
+    }
+    if (carry.length) {
+      const line = carry.toString('utf8').replace(/\r$/, '')
+      if (line.trim() !== '') onLine(line)
+    }
+  } finally { await fh.close() }
+}
+
+module.exports = { readTail, lastLines, linesSince, parseJsonLines, eachLineBackwards }

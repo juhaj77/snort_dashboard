@@ -10,6 +10,7 @@
 // One row older than `since` is returned first as an anchor: it marks where the first
 // interval starts and is not part of the totals.
 const fs = require('fs')
+const { eachLineBackwards } = require('./readTail')
 
 const CHUNK = 256 * 1024
 const GAUGE = /(^|\.)(current_|concurrent_|max_concurrent|bytes_in_use|items_in_use|memory$|max$|max_)/
@@ -70,27 +71,6 @@ const headerOf = async file => {
   }
   cache.set(file, c)
   return { ...c, size: st.size }
-}
-
-/** Complete lines from the end of the file down to byte `stopAt`, newest first, via callback. */
-const eachLineBackwards = async (file, size, stopAt, onLine) => {
-  const fh = await fs.promises.open(file, 'r')
-  try {
-    let pos = size, carry = ''
-    while (pos > stopAt) {
-      const len = Math.min(CHUNK, pos - stopAt)
-      pos -= len
-      const buf = Buffer.alloc(len)
-      await fh.read(buf, 0, len, pos)
-      const parts = (buf.toString('utf8') + carry).split('\n')
-      carry = pos > stopAt ? parts.shift() : ''
-      for (let i = parts.length - 1; i >= 0; i--) {
-        if (parts[i].trim() === '') continue
-        if (onLine(parts[i].replace(/\r$/, '')) === false) return
-      }
-    }
-    if (carry.trim()) onLine(carry)
-  } finally { await fh.close() }
 }
 
 /**

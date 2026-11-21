@@ -25,7 +25,7 @@ The server reads Snort's log files directly. No database is needed:
 | Tab | What it shows |
 |---|---|
 | **Overview** | Security dashboard for a time window (15 min, 1 h, 6 h, 24 h or the latest 5,000 alerts). It shows alert activity over time stacked by severity, the share of each severity, top source and destination IPs, top signatures, protocols, destination ports, classifications and the AppID application mix. An event timeline and a recent-events list open a details panel with addresses, ports, protocol, rule (gid:sid:rev) and a Wireshark filter. Clicking a bar, a severity or a time column filters every chart. |
-| **Network** | Live connection map in the style of a SOC console: this computer in the centre, every host it talks to around it, grouped by process, service or network and coloured by Snort alert severity. Select a host to see its connections, alerts, AppID data and names, and run a **traceroute** or (on your own network) an **nmap** port scan. Works on Linux and Windows, including a Windows host monitored from WSL. See [NETWORK.md](NETWORK.md). |
+| **Network** | Live connection map in the style of a SOC console: this computer in the centre, every host it talks to around it, grouped by process, service or network and coloured by Snort alert severity. Hosts that match a simple rule (P1/P2 alerts, rising alerts, inbound from the internet, service on an unexpected port, new) get a badge and are listed under **Needs attention**, each with its reason, over a 1 h / 6 h / 24 h window of the Snort and AppID logs. Select a host to see why it was flagged, its alert and AppID activity over time, its connections, alerts, AppID data and names, and run a **traceroute** or (on your own network) an **nmap** port scan. Works on Linux and Windows, including a Windows host monitored from WSL. See [NETWORK.md](NETWORK.md). |
 | **Alerts** | The latest alerts, refreshed every 5 seconds (paused while an alert's details are open). Click a row to see all fields and a **Wireshark filter** built from the packet timestamp. |
 | **AppID** | The latest AppID sessions from `appid.json` as soon as the tab opens; new ones stream in live over a socket connection. |
 | **Search** | Load the latest N alerts, filter them by time range or by text (include or exclude), sort by any column, or sort by rarity. |
@@ -126,7 +126,7 @@ All endpoints return JSON. Log files are read from the end, so large logs don't 
 | `GET /appid/:amount` | the newest `amount` AppID events from `appid.json` |
 | `GET /perf` | `perf_monitor_base.csv` rows of the current Snort run, header first |
 | `GET /perf?since=<epoch s>&points=<n>` | rows of the current run from `since` (`0` = whole run), folded into at most `n` (default 600) samples: counters summed, gauges newest; with run start and end |
-| `GET /network…` | connection snapshot, traceroute, nmap scan, LAN discovery, reverse DNS; see [NETWORK.md § API](NETWORK.md#api) |
+| `GET /network…` | connection snapshot, per-address alert/AppID history, traceroute, nmap scan, LAN discovery, reverse DNS; see [NETWORK.md § API](NETWORK.md#api) |
 | socket.io `:3009`, event `json` | each new `appid.json` line as it is written |
 
 Malformed or half-written log lines are skipped.

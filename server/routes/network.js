@@ -6,12 +6,14 @@
 // GET /network/scan/:ip              nmap service scan (private / link-local addresses only)
 // GET /network/discover              nmap ping sweep of the local networks
 // GET /network/rdns/:ip              reverse DNS
+// GET /network/history?window=       per-address Snort alert and AppID counts over 1 h / 6 h / 24 h
 //
 // Read-only: nothing is configured or written. Targets must be literal IP addresses.
 const express = require('express')
 const net = require('net')
 const T = require('../lib/net/tools')
 const { isLocalTarget } = require('../lib/net/parse')
+const { cachedHistory } = require('../lib/net/history')
 
 const router = express.Router()
 const MAX_JOBS = 2
@@ -88,6 +90,19 @@ router.get('/discover', job(() => T.discover()))
 router.get('/rdns/:ip', async (req, res) => {
   const ip = ipParam(req, res)
   if (ip) res.json({ ip, names: await T.reverse(ip) })
+})
+
+// Per-address Snort alert and AppID history for 1 h, 6 h or 24 h (counts from the logs)
+const WINDOWS = { 3600: 30, 21600: 60, 86400: 120 } // window → cache seconds
+router.get('/history', async (req, res) => {
+  const window = Number(req.query.window || 3600)
+  if (!WINDOWS[window]) return res.status(400).json({ error: 'window must be 3600, 21600 or 86400' })
+  try {
+    res.json(await cachedHistory(window, WINDOWS[window]))
+  } catch (e) {
+    console.log(e.message)
+    res.status(500).json({ error: e.message })
+  }
 })
 
 module.exports = router

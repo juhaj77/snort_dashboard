@@ -595,6 +595,34 @@ html, body { background: var(--bg); }
 .net-sev { display: inline-flex; gap: 8px; white-space: nowrap; align-items: center; }
 .net-listen td:nth-child(2) { white-space: normal; overflow-wrap: anywhere; }
 
+/* Network: signals, activity */
+.net-new { fill: none; stroke: var(--purple); stroke-width: 1.2; stroke-dasharray: 2 2; }
+.net-badge circle { stroke: var(--bg); stroke-width: 1.5; }
+.net-badge text { fill: var(--bg); font-size: 9px; font-weight: 700; pointer-events: none; }
+.sw-badge {
+  display: inline-grid; place-items: center; width: 13px; height: 13px; border-radius: 50%;
+  color: var(--bg); font-size: 9px; font-weight: 700; font-style: normal;
+}
+.sw-new { width: 11px; height: 11px; border: 1.2px dashed var(--purple); }
+.sig-tags { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+.sig-tag {
+  display: inline-block; padding: 0 6px; border-radius: 3px; font-size: 11px; font-weight: 600; white-space: nowrap;
+  color: var(--text-strong); background: color-mix(in srgb, var(--sc) 18%, transparent);
+  border: 1px solid color-mix(in srgb, var(--sc) 55%, transparent);
+}
+.nd-signals { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 6px; }
+.nd-signals li { display: flex; flex-direction: column; gap: 2px; align-items: flex-start; color: var(--text); line-height: 1.4; }
+.nd-act { margin-bottom: 8px; }
+.nd-act-head { display: flex; justify-content: space-between; gap: 8px; font-size: 11px; color: var(--text-strong); margin-bottom: 2px; }
+.nd-act-head .muted { font-variant-numeric: tabular-nums; }
+.nd-act-plot { width: 100%; }
+.nd-act-bar { fill: var(--bar); }
+.nd-act-bar.on { fill: var(--text-strong); }
+.net-rules { margin-top: 10px; font-size: 12px; color: var(--text); }
+.net-rules summary { cursor: pointer; color: var(--muted); }
+.net-rules p { margin: 6px 0; color: var(--muted); line-height: 1.5; }
+.net-rules ul { margin: 0; padding-left: 18px; line-height: 1.6; }
+
 /* Alerts: paused while details are open */
 .paused {
   display: inline-flex; align-items: center; gap: 6px; padding: 1px 8px; border-radius: 10px; font-size: 11px; font-weight: 600;

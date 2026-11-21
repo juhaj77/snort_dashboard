@@ -15,6 +15,11 @@ Select a host to see:
 From the same panel you can run a **traceroute** or, for devices in your own network, an
 **nmap port scan**.
 
+The **1 h / 6 h / 24 h** switch sets how much of the Snort and AppID logs is used. Hosts that
+match a simple rule (P1/P2 alerts, rising alerts, inbound connections from the internet, …)
+get a badge on the map and are listed under **Needs attention**. See
+[Signals: why a host is flagged](#signals-why-a-host-is-flagged).
+
 The view works on Linux and on Windows. It runs the operating system's own tools, so nothing has
 to be configured for the basic map. The optional tools below add more detail.
 
@@ -24,6 +29,7 @@ to be configured for the basic map. The optional tools below add more detail.
 - [Running the server natively on Windows](#running-the-server-natively-on-windows)
 - [Hostnames from the wire (tshark)](#hostnames-from-the-wire-tshark)
 - [Port scans and LAN discovery (nmap)](#port-scans-and-lan-discovery-nmap)
+- [Signals: why a host is flagged](#signals-why-a-host-is-flagged)
 - [Settings](#settings)
 - [API](#api)
 - [Limitations](#limitations)
@@ -185,6 +191,44 @@ At most two traceroutes or scans run at a time.
 
 ---
 
+## Signals: why a host is flagged
+
+The server counts, per address, the Snort alerts (by priority and signature) and the AppID
+sessions of the selected window, also per time slice (`GET /network/history`). It reads the
+logs backwards from the end only as far as the window reaches, including rotated
+`alert_json.txt.<time>` files. The browser then applies these rules:
+
+| Signal | Level | Rule |
+|---|---|---|
+| P1 alerts | high (red badge) | Snort raised priority 1 alerts involving the address |
+| P2 alerts | warning | priority 2 alerts |
+| Alerts rising | warning | ≥ 5 alerts in the last 10 min and ≥ 3 × the rate of the rest of the window (needs ≥ 20 min of earlier log) |
+| Inbound from the internet | warning | an open **TCP** connection that a public address made to a listening port. UDP is left out: every bound UDP socket looks like a listener, so its direction cannot be told |
+| Service on unexpected port | warning | AppID named a service (HTTP, SSH, DNS, SMTP, RDP, …) on a port that service does not normally use |
+| New | info (dashed ring) | first appeared in the logs in the last 10 min, after ≥ 30 min of log without it |
+| Uncommon remote port | info | an open outbound connection to a public address on a port that is not a well-known service port |
+
+There is deliberately **no combined risk score**. The weights of such a score would be made up,
+and a single number hides the reason. Each signal is shown with its reason and the numbers
+behind it. Needs attention lists hosts by their most serious signal, then by how many signals
+they have, then by alert volume.
+
+Notes:
+
+- The signals are counted from the logs and do not judge whether traffic is malicious. A noisy
+  rule (for example UPnP advertisements from the router) flags its source every time. Tune or
+  suppress such rules in Snort if they are not useful.
+- *Service on unexpected port* needs AppID to name applications. If AppID reports every
+  session as `unknown`, the OpenAppID detector package (ODP) is not loaded; see the Snort
+  documentation for `appid.app_detector_dir`. This view does not change the Snort configuration.
+- *New* only means new **within the window and the logs**. After a Snort restart the logs start
+  empty, so nothing is called new until 30 minutes of log exist.
+- If the logs do not reach back to the start of the window (Snort restart, rotation), a note
+  under the toolbar says where they start.
+- The connection list has no history: it is the current `netstat`/`ss` snapshot.
+
+---
+
 ## Settings
 
 | Variable | Default | Meaning |
@@ -209,6 +253,7 @@ Tool paths are found automatically:
 | `GET /network/scan/:ip` | nmap ports `[{port, proto, state, service, version}]`; 403 for non-local addresses |
 | `GET /network/discover` | hosts that answered the ping sweep |
 | `GET /network/rdns/:ip` | reverse DNS names |
+| `GET /network/history?window=3600\|21600\|86400` | per address: alert counts by priority, top signatures, AppID sessions, apps, service ports, TLS/HTTP names, first/last seen, 30 time slices; plus where the logs start (`coverage`) |
 
 `:ip` must be a literal IPv4 or IPv6 address. The tools run without a shell and with fixed
 arguments.
@@ -230,6 +275,8 @@ only from your own machine or a trusted network.
 - **UDP** shows only sockets that are connected to a peer. Most UDP traffic, such as DNS and QUIC,
   appears through Snort and AppID instead.
 - **No threat intelligence** yet. Alerts come from your Snort rules only.
+- **History is read from the logs on request** (cached 30–120 s). A 24 h window over large logs
+  can take a second or two the first time.
 
 ---
 

@@ -93,20 +93,35 @@ test('Network tab draws hosts from the connection snapshot and shows details', a
     neighbors: [],
   };
   const info = { platform: 'wsl', sources: [{ id: 'windows', label: 'Windows host' }, { id: 'linux', label: 'WSL' }], tools: { traceroute: true, nmap: false }, wire: { iface: 'snort0' } };
+  const now = Math.floor(Date.now() / 1000);
+  const hist = w => ({
+    window: w, since: now - w, until: now, bins: 30, step: w / 30, recent: 600,
+    coverage: { alerts: { total: 3, from: now - w, files: ['alert_json.txt'] }, appid: { total: 0, from: null } },
+    hosts: { '20.1.2.3': { alerts: { n: 3, sev: { 0: 0, 1: 3, 2: 0, 3: 0, 4: 0 }, first: now - 900, last: now - 60, recent: 2, bins: Array(30).fill(0).map((_, i) => (i === 29 ? 3 : 0)), sigs: [{ msg: 'Bad thing', priority: 1, count: 3, last: now - 60 }], sigCount: 1 } } },
+  });
+  try { localStorage.removeItem('net.window'); } catch (e) { /* ignore */ }
   global.fetch = jest.fn(url => Promise.resolve({
     ok: true,
     json: () => Promise.resolve(url.includes('/network/snapshot') ? snap : url.includes('/network/rdns/') ? { names: ['host.example'] }
-      : url.endsWith('/network') ? info : []),
+      : url.includes('/network/history') ? hist(Number(url.split('window=')[1])) : url.endsWith('/network') ? info : []),
   }));
-  render(<App />);
-  fireEvent.click(screen.getByRole('button', { name: 'Network' }));
+  const { unmount } = render(<App />);
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Network' })); });
+  expect(await screen.findByText('Needs attention')).toBeInTheDocument();
+  expect((await screen.findAllByText('P1 alerts')).length).toBeGreaterThan(0);
   expect(await screen.findByText('Connection map')).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Windows host' })).toBeInTheDocument();
-  fireEvent.click(screen.getAllByText('20.1.2.3')[0].closest('tr'));
+  await act(async () => { fireEvent.click(screen.getAllByText('20.1.2.3')[0].closest('tr')); });
   expect(await screen.findByText('host.example')).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Port scan' })).toBeDisabled(); // no nmap
   expect(screen.getByRole('button', { name: 'Traceroute' })).toBeEnabled();
   expect(screen.getByText('TCP 135')).toBeInTheDocument();
+  expect(screen.getByText('Why look at this host')).toBeInTheDocument();
+  expect(screen.getAllByText(/Bad thing/).length).toBeGreaterThan(0);
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: '6 h' })); });
+  await waitFor(() => expect(global.fetch.mock.calls.some(c => c[0].includes('/network/history?window=21600'))).toBe(true));
+  expect(await screen.findByText('Snort alerts · last 6 hours')).toBeInTheDocument();
+  unmount();
 });
 
 test('Performance range picker asks the server for that range', async () => {

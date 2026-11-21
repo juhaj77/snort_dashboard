@@ -1,4 +1,4 @@
-import { buildPeers, groupKey, layout, scopeOf, summary, matches, portLabel } from './netModel'
+import { attention, buildPeers, groupKey, layout, scopeOf, signalsOf, summary, matches, portLabel } from './netModel'
 
 const snapshot = {
   host: { name: 'pc', addrs: [{ ip: '192.168.1.217' }], gateway: '192.168.1.1' },
@@ -12,16 +12,22 @@ const snapshot = {
   neighbors: [{ ip: '192.168.1.1', mac: 'aa:bb:cc:dd:ee:ff' }, { ip: '224.0.0.251', mac: '01:00:5e:00:00:fb' }],
   names: { '20.1.2.3': ['example.com'] },
 }
-const alerts = [
-  { id: 'a', seconds: 100, priority: 1, srcIp: '6.6.6.6', dstIp: '192.168.1.217', msg: 'bad' },
-  { id: 'b', seconds: 101, priority: 3, srcIp: '192.168.1.217', dstIp: '20.1.2.3', msg: 'meh' },
-  { id: 'c', seconds: 102, priority: 2, srcIp: '192.168.1.1', dstIp: '239.255.255.250', msg: 'upnp' },
-]
-const appid = [
-  { client_info: { ip: '192.168.1.217' }, service_info: { ip: '20.1.2.3' }, apps: { service: 'HTTPS' }, tls_host: 'api.example.com' },
-  { client_info: { ip: '192.168.1.217' }, service_info: { ip: '9.9.9.9' }, apps: { service: 'DNS' } },
-  { broken: true },
-]
+const NOW = 100000
+const bins = () => Array(30).fill(0)
+const al = (n, sev, extra = {}) => ({ n, sev: { 0: 0, 1: 0, 2: 0, 3: 0, 4: 0, ...sev }, first: NOW - 3000, last: NOW - 10, recent: 0, bins: bins(), sigs: [], sigCount: 0, ...extra })
+const ap = (n, extra = {}) => ({ n, first: NOW - 2000, last: NOW - 5, recent: 0, bins: bins(), apps: {}, services: [], names: [], ...extra })
+const hist = {
+  window: 3600, since: NOW - 3600, until: NOW, bins: 30, step: 120, recent: 600,
+  coverage: { alerts: { total: 10, from: NOW - 3600 }, appid: { total: 3, from: NOW - 3600 } },
+  hosts: {
+    '192.168.1.217': { alerts: al(9, { 1: 1 }) }, // this machine: ignored
+    '6.6.6.6': { alerts: al(1, { 1: 1 }, { sigs: [{ msg: 'bad', priority: 1, count: 1, last: NOW - 10 }], sigCount: 1 }) },
+    '20.1.2.3': { alerts: al(1, { 3: 1 }), appid: ap(1, { apps: { HTTPS: 1 }, names: ['api.example.com'] }) },
+    '192.168.1.1': { alerts: al(1, { 2: 1 }) },
+    '239.255.255.250': { alerts: al(1, { 2: 1 }) }, // multicast: ignored
+    '9.9.9.9': { appid: ap(1, { apps: { DNS: 1 } }) },
+  },
+}
 
 test('scopeOf', () => {
   expect(scopeOf('192.168.1.1')).toBe('lan')
@@ -33,27 +39,29 @@ test('scopeOf', () => {
 })
 
 test('buildPeers merges connections, alerts, AppID, neighbours and wire names', () => {
-  const peers = buildPeers(snapshot, alerts, appid, { seen: true, lan: true })
+  const peers = buildPeers(snapshot, hist, { seen: true, lan: true })
   const by = Object.fromEntries(peers.map(p => [p.ip, p]))
   expect(Object.keys(by).sort()).toEqual(['192.168.1.1', '192.168.1.50', '20.1.2.3', '6.6.6.6', '9.9.9.9'])
-  expect(by['20.1.2.3']).toMatchObject({ live: true, process: 'chrome.exe', port: 443, outbound: 2, maxSev: 3, app: 'HTTPS', appSessions: 1 })
+  expect(by['20.1.2.3']).toMatchObject({ live: true, process: 'chrome.exe', port: 443, outbound: 2, maxSev: 3, app: 'HTTPS', appSessions: 1, alertCount: 1, firstSeen: NOW - 3000, lastSeen: NOW - 5 })
   expect([...by['20.1.2.3'].names]).toEqual(['api.example.com', 'example.com'])
   expect(by['192.168.1.50']).toMatchObject({ inbound: 1, scope: 'lan' })
   expect(by['192.168.1.1']).toMatchObject({ gateway: true, live: false, maxSev: 2 })
   expect(by['192.168.1.1'].neighbor.mac).toBe('aa:bb:cc:dd:ee:ff')
   expect(by['6.6.6.6']).toMatchObject({ live: false, maxSev: 1 })
+  expect(by['6.6.6.6'].signals.map(x => x.id)).toEqual(['p1'])
+  expect(by['6.6.6.6'].signals[0].detail).toContain('bad')
 })
 
 test('buildPeers options: without seen peers only live hosts get alerts; loopback opt-in', () => {
-  const peers = buildPeers(snapshot, alerts, appid, { seen: false, lan: false })
+  const peers = buildPeers(snapshot, hist, { seen: false, lan: false })
   expect(peers.map(p => p.ip).sort()).toEqual(['192.168.1.50', '20.1.2.3'])
-  const withLo = buildPeers(snapshot, [], [], { loopback: true })
+  const withLo = buildPeers(snapshot, null, { loopback: true })
   expect(withLo.map(p => p.ip)).toContain('127.0.0.1')
-  expect(buildPeers(null, null, null, {})).toEqual([])
+  expect(buildPeers(null, null, {})).toEqual([])
 })
 
 test('grouping and layout are deterministic and place every node', () => {
-  const peers = buildPeers(snapshot, alerts, appid, { seen: true, lan: true })
+  const peers = buildPeers(snapshot, hist, { seen: true, lan: true })
   expect(groupKey(peers.find(p => p.ip === '20.1.2.3'), 'process')).toBe('chrome.exe')
   expect(groupKey(peers.find(p => p.ip === '20.1.2.3'), 'service')).toBe('HTTPS')
   expect(groupKey(peers.find(p => p.ip === '6.6.6.6'), 'process')).toBe('Snort alerts, not connected')
@@ -67,7 +75,7 @@ test('grouping and layout are deterministic and place every node', () => {
 })
 
 test('summary, search and port labels', () => {
-  const peers = buildPeers(snapshot, alerts, appid, { seen: true, lan: true })
+  const peers = buildPeers(snapshot, hist, { seen: true, lan: true })
   expect(summary(snapshot, peers)).toMatchObject({ hosts: 2, lanHosts: 1, netHosts: 1, connections: 4, inbound: 2, outbound: 2, listening: 1, neighbors: 1, alerted: 3, p1: 1 })
   const ex = peers.find(p => p.ip === '20.1.2.3')
   expect(matches(ex, 'example')).toBe(true)
@@ -75,4 +83,52 @@ test('summary, search and port labels', () => {
   expect(matches(ex, 'nope')).toBe(false)
   expect(portLabel(443)).toBe('443 HTTPS')
   expect(portLabel(12345)).toBe('12345')
+})
+
+const peer = (over = {}) => {
+  const [n] = buildPeers({ host: { addrs: [] }, connections: [] }, { ...hist, hosts: { '8.8.4.4': over.h || { alerts: al(0, {}) } } }, { seen: true })
+  return Object.assign(n, over.n || {})
+}
+
+test('signals: rising alerts need a clear jump against enough earlier log', () => {
+  // 10 recent alerts, 2 in the 50 minutes before → rising
+  const up = peer({ h: { alerts: al(12, { 3: 12 }, { recent: 10 }) } })
+  expect(up.signals.map(x => x.id)).toContain('rising')
+  // steady rate: 10 recent, 50 before (= 10 per 10 min) → not rising
+  expect(peer({ h: { alerts: al(60, { 3: 60 }, { recent: 10 }) } }).signals.map(x => x.id)).not.toContain('rising')
+  // fewer than 5 recent → not rising
+  expect(peer({ h: { alerts: al(4, { 3: 4 }, { recent: 4 }) } }).signals).toEqual([])
+  // log starts 15 minutes ago: not enough earlier log to compare
+  const short = { ...hist, coverage: { ...hist.coverage, alerts: { from: NOW - 900 } } }
+  expect(signalsOf(up, short).map(x => x.id)).not.toContain('rising')
+})
+
+test('signals: new host, service on unexpected port, inbound from the internet, uncommon port', () => {
+  const fresh = peer({ h: { appid: ap(2, { first: NOW - 300 }) } })
+  expect(fresh.signals.map(x => x.id)).toEqual(['new'])
+  // logs only started 20 min ago → can't say it is new
+  const shortLog = { ...hist, coverage: { alerts: { from: NOW - 1200 }, appid: { from: NOW - 1200 } } }
+  expect(signalsOf(fresh, shortLog)).toEqual([])
+  const ssh = peer({ h: { appid: ap(1, { services: [{ app: 'SSH', port: 2222, proto: 'TCP', count: 1 }, { app: 'HTTP', port: 80, proto: 'TCP', count: 3 }] }) } })
+  expect(ssh.signals).toEqual([expect.objectContaining({ id: 'mismatch', detail: 'SSH on 2222/TCP (AppID)' })])
+
+  const snap = {
+    host: { addrs: [{ ip: '10.0.0.2' }] },
+    connections: [
+      { proto: 'TCP', localIp: '10.0.0.2', localPort: 3389, remoteIp: '7.7.7.7', remotePort: 51000, direction: 'in', process: 'svchost.exe' },
+      { proto: 'TCP', localIp: '10.0.0.2', localPort: 50000, remoteIp: '8.8.8.8', remotePort: 6667, direction: 'out' },
+      { proto: 'TCP', localIp: '10.0.0.2', localPort: 50001, remoteIp: '1.1.1.1', remotePort: 443, direction: 'out' },
+      { proto: 'UDP', localIp: '10.0.0.2', localPort: 5353, remoteIp: '9.9.9.9', remotePort: 443, direction: 'in' },
+    ],
+  }
+  const by = Object.fromEntries(buildPeers(snap, null, {}).map(p => [p.ip, p]))
+  expect(by['7.7.7.7'].signals).toEqual([expect.objectContaining({ id: 'inbound', level: 'warn', detail: '1 TCP connection to local port 3389 (svchost.exe)' })])
+  expect(by['8.8.8.8'].signals).toEqual([expect.objectContaining({ id: 'port', level: 'info' })])
+  expect(by['1.1.1.1'].signals).toEqual([])
+  expect(by['9.9.9.9'].signals).toEqual([]) // UDP direction is not trusted
+})
+
+test('attention orders by most serious signal, then by count', () => {
+  const peers = buildPeers(snapshot, hist, { seen: true, lan: true })
+  expect(attention(peers).map(p => p.ip)).toEqual(['6.6.6.6', '192.168.1.1'])
 })
