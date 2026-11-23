@@ -21,11 +21,26 @@
 
 -- HOME_NET and EXTERNAL_NET must be set now
 -- setup the network addresses you are protecting
-HOME_NET = 'any'
+--
+-- snort_dashboard: HOME_NET is the networks you protect. With 'any', rules written
+-- for "outside -> inside" also fire on your own devices: e.g. the router's normal
+-- UPnP/SSDP announcements trigger 1:1384 "UPnP malformed advertisement" thousands
+-- of times a day. The default below covers private IPv4, IPv6 ULA and link-local.
+--
+-- Your internet provider's IPv6 prefix belongs in HOME_NET too, but it is specific
+-- to your connection and can change, so it is not kept in this file. Put it in
+-- local_net.lua next to this file (it is loaded if it exists), for example:
+--   HOME_NET = '[192.168.1.0/24,fe80::/10,2001:db8:1234:5600::/56]'
+-- The Network tab of the dashboard shows your current provider prefix and warns
+-- when it is no longer inside HOME_NET. Restart Snort after editing.
+HOME_NET = '[10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fc00::/7,fe80::/10]'
+
+local local_net = loadfile('/usr/local/etc/snort/local_net.lua')
+if local_net then local_net() end
 
 -- set up the external network addresses.
--- (leave as "any" in most situations)
-EXTERNAL_NET = 'any'
+-- everything that is not HOME_NET
+EXTERNAL_NET = '!$HOME_NET'
 
 include 'snort_defaults.lua'
 

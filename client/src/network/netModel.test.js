@@ -1,4 +1,4 @@
-import { attention, buildPeers, eui64Mac, expand6, groupKey, layout, scopeOf, signalsOf, summary, matches, portLabel } from './netModel'
+import { attention, buildPeers, eui64Mac, expand6, groupKey, layout, scopeOf, signalsOf, summary, matches, portLabel, providerPrefixes } from './netModel'
 
 const snapshot = {
   host: { name: 'pc', addrs: [{ ip: '192.168.1.217' }], gateway: '192.168.1.1' },
@@ -177,4 +177,22 @@ test('addresses of one device merge into one node; own /64 is the local network'
   expect(by['2001:db8:9::5'].scope).toBe('internet')
   expect(matches(gw, 'fe80::46d4')).toBe(true)
   expect(summary(snap, peers).neighbors).toBe(2) // devices, not addresses
+})
+
+test('providerPrefixes lists global /64s and checks them against HOME_NET', () => {
+  const addrs = [
+    { ip: '192.168.1.217' }, { ip: 'fe80::1%12' }, { ip: 'fd00::5' },
+    { ip: '2001:db8:1:2:aaaa::1' }, { ip: '2001:db8:1:2:bbbb::2' }, // same /64 (temporary address)
+    { ip: '2a00:1:2:3::9' },
+  ]
+  const nets = ['192.168.1.0/24', '2001:db8:1::/56', 'fe80::/10']
+  expect(providerPrefixes(addrs, nets)).toEqual([
+    { prefix: '2001:db8:1:2::/64', inHomeNet: true },
+    { prefix: '2a00:1:2:3::/64', inHomeNet: false },
+  ])
+  // prefix changed by the provider: no longer inside the configured /56
+  expect(providerPrefixes([{ ip: '2001:db8:1:102::1' }], nets)).toEqual([{ prefix: '2001:db8:1:102::/64', inHomeNet: false }])
+  expect(providerPrefixes([{ ip: '2001:db8:1:2::1' }], [])).toEqual([{ prefix: '2001:db8:1:2::/64', inHomeNet: false }])
+  expect(providerPrefixes([{ ip: '2001:db8:1:2::1' }], ['!2001:db8::/32'])).toEqual([{ prefix: '2001:db8:1:2::/64', inHomeNet: false }])
+  expect(providerPrefixes(null, nets)).toEqual([])
 })

@@ -247,6 +247,7 @@ Open <http://localhost:3000>.
 |---|---|---|
 | `PORT` | server: REST API port | `9000` |
 | `NET_CAPTURE_IFACE` | server: interface tshark reads for hostnames (Network tab) | `snort0`, else the default-route interface |
+| `SNORT_CONF_DIR` | server: where `local_net.lua` / `snort.lua` are read for `HOME_NET` (Network tab) | `/usr/local/etc/snort` |
 | `REACT_APP_API` | client: REST API URL | `http://<page host>:9000` |
 | `REACT_APP_SOCKET` | client: AppID socket URL | `ws://<page host>:3009` |
 

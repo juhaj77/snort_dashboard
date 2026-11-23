@@ -47,6 +47,40 @@ export const expand6 = ip => {
 }
 const prefix64 = ip => { const g = expand6(ip); return g ? g.slice(0, 4).join(':') : null }
 
+/** Is the IPv6 address (groups from expand6) inside cidr ("2001:db8::/56")? */
+const inCidr6 = (g, cidr) => {
+  const [addr, lenStr] = String(cidr).split('/')
+  const net = expand6(addr)
+  const len = lenStr === undefined ? 128 : Number(lenStr)
+  if (!net || !Number.isInteger(len) || len < 0 || len > 128) return false
+  for (let i = 0; i < 8; i++) {
+    const bits = Math.max(0, Math.min(16, len - 16 * i))
+    if (!bits) break
+    const mask = (0xffff << (16 - bits)) & 0xffff
+    if ((g[i] & mask) !== (net[i] & mask)) return false
+  }
+  return true
+}
+
+/**
+ * This machine's internet provider IPv6 prefixes (the /64 of each global address) and
+ * whether Snort's HOME_NET covers them. The provider can change the prefix; then
+ * HOME_NET has to be updated, or Snort treats this machine as an outside host.
+ * → [{ prefix: '2001:db8:1:2::/64', inHomeNet: true }]
+ */
+export const providerPrefixes = (addrs, homeNets = []) => {
+  const seen = new Map()
+  ;(addrs || []).forEach(a => {
+    const g = expand6(a && a.ip)
+    if (!g || (g[0] & 0xe000) !== 0x2000) return // global unicast 2000::/3 only
+    const prefix = g.slice(0, 4).map(x => x.toString(16)).join(':') + '::/64'
+    if (seen.has(prefix)) return
+    const net = [...g.slice(0, 4), 0, 0, 0, 0]
+    seen.set(prefix, { prefix, inHomeNet: homeNets.some(c => !String(c).startsWith('!') && inCidr6(net, c)) })
+  })
+  return [...seen.values()]
+}
+
 /** MAC address embedded in an EUI-64 interface id (…:xxff:fexx:…), or null */
 export const eui64Mac = ip => {
   const g = expand6(ip)

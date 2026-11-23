@@ -31,6 +31,7 @@ to be configured for the basic map. The optional tools below add more detail.
 - [Port scans and LAN discovery (nmap)](#port-scans-and-lan-discovery-nmap)
 - [One device, several addresses](#one-device-several-addresses)
 - [Signals: why a host is flagged](#signals-why-a-host-is-flagged)
+- [Provider IPv6 prefix and Snort's HOME_NET](#provider-ipv6-prefix-and-snorts-home_net)
 - [Settings](#settings)
 - [API](#api)
 - [Limitations](#limitations)
@@ -212,6 +213,39 @@ addresses share the same random MAC.
 
 ---
 
+## Provider IPv6 prefix and Snort's HOME_NET
+
+Snort's rules use `$HOME_NET` (your networks) and `$EXTERNAL_NET` (everything else) to tell
+inbound from outbound traffic. With IPv6, your machine's public addresses come from a prefix
+that your internet provider delegates to the router, so that prefix belongs in `HOME_NET`.
+Providers change the prefix now and then, for example after a router restart or a network
+change. If `HOME_NET` is not updated, Snort treats your own machine as an outside host.
+
+Above the KPIs the Network tab shows the provider prefix (the /64 of each global IPv6
+address of the selected machine) and checks it against `HOME_NET`:
+
+- `Provider IPv6 prefix 2001:db8:1234:5600::/64 · inside Snort's HOME_NET (…/local_net.lua)`:
+  all good.
+- A warning that the prefix **is not inside** `HOME_NET`: the provider has changed it. Update
+  `HOME_NET` in the file named in the message and restart Snort
+  (`sudo systemctl restart snort`). Reload the page to check again.
+
+`HOME_NET` is read from `local_net.lua` and then `snort.lua` in `SNORT_CONF_DIR`
+(default `/usr/local/etc/snort`), the last plain `HOME_NET = '…'` assignment that is not in a
+comment. The repository's `snort/snort.lua` sets a default for private networks and then loads
+`local_net.lua` if it exists. Keep your own prefix there, outside the repository:
+
+```lua
+-- /usr/local/etc/snort/local_net.lua
+HOME_NET = '[192.168.1.0/24,2001:db8:1234:5600::/56,fc00::/7,fe80::/10]'
+```
+
+The router usually gets a /56 (sometimes a /48 or /60) and gives each network a /64 of it.
+Using the router's whole prefix in `HOME_NET` covers every network behind it. Your provider's
+documentation or the router's status page shows the delegated prefix length.
+
+---
+
 ## Signals: why a host is flagged
 
 The server counts, per address, the Snort alerts (by priority and signature) and the AppID
@@ -255,6 +289,7 @@ Notes:
 | Variable | Default | Meaning |
 |---|---|---|
 | `NET_CAPTURE_IFACE` | `snort0`, else the default-route interface | interface tshark reads for hostnames |
+| `SNORT_CONF_DIR` | `/usr/local/etc/snort` | where `local_net.lua` / `snort.lua` are read for `HOME_NET` |
 
 Tool paths are found automatically:
 
@@ -268,7 +303,7 @@ Tool paths are found automatically:
 
 | Endpoint | Returns |
 |---|---|
-| `GET /network` | platform, available sources, which tools were found, tshark status |
+| `GET /network` | platform, available sources, which tools were found, tshark status, Snort's `HOME_NET` (`{file, value, nets}`) |
 | `GET /network/snapshot?source=windows\|linux` | connections (with process and direction), listening sockets, neighbours, gateway, captured names |
 | `GET /network/trace/:ip?source=` | traceroute hops `[{hop, ip, rtt[], lost}]` |
 | `GET /network/scan/:ip` | nmap ports `[{port, proto, state, service, version}]`; 403 for non-local addresses |
@@ -312,5 +347,6 @@ only from your own machine or a trusted network.
 | Port scan says the host did not answer | A firewall on the device drops probes; that is common for phones and Windows PCs. |
 | "tshark: interface snort0 not found" | Start the forwarder (ENVIRONMENT.md § 7) or set `NET_CAPTURE_IFACE`. |
 | Map, alerts and AppID stop updating after WSL restarted | The forwarder did not come back: enable `snort-forward.service` (ENVIRONMENT.md § 9.1, "After a WSL restart" in § 10). |
+| "Provider IPv6 prefix … is not inside Snort's HOME_NET" | The provider changed your IPv6 prefix: update `HOME_NET` in `local_net.lua` and restart Snort ([above](#provider-ipv6-prefix-and-snorts-home_net)). |
 | "tshark exited" | Run the tshark command above by hand as root to see the error. |
 | Network tab shows "Could not load data … 404" | Restart the server; it predates the Network tab. |

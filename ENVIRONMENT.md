@@ -195,8 +195,24 @@ appid_listener =
 * `--plugin-path /usr/local/lib/snort/plugins/extra`: plugins load before the Lua config, so
   without it `appid_listener` is silently missing.
 
-**Optional.** Set `HOME_NET` to your LAN (e.g. `HOME_NET = '192.168.1.0/24'`) so that rules
-using `$HOME_NET` / `$EXTERNAL_NET` match direction correctly. It is `'any'` by default.
+**Home network.** `snort/snort.lua` sets `HOME_NET` to the private networks
+(`10/8`, `172.16/12`, `192.168/16`, IPv6 ULA and link-local) and `EXTERNAL_NET = '!$HOME_NET'`,
+so rules using `$HOME_NET` / `$EXTERNAL_NET` match the direction correctly. With Snort's default
+`'any'`, "outside → inside" rules also fire on your own devices: for example, the router's
+normal UPnP/SSDP announcements trigger `1:1384 "UPnP malformed advertisement"` thousands of
+times a day.
+
+Your internet provider's IPv6 prefix belongs in `HOME_NET` too. It is specific to your
+connection and can change, so it is kept out of the repository in
+`/usr/local/etc/snort/local_net.lua`, which `snort.lua` loads if it exists **[WSL]**:
+```bash
+sudo tee /usr/local/etc/snort/local_net.lua >/dev/null <<'EOF'
+HOME_NET = '[192.168.1.0/24,2001:db8:1234:5600::/56,fc00::/7,fe80::/10]'
+EOF
+```
+Replace the LAN and the prefix with your own. The dashboard's Network tab shows your current
+provider prefix and warns when it is no longer inside `HOME_NET`; see
+[NETWORK.md](NETWORK.md#provider-ipv6-prefix-and-snorts-home_net).
 
 ### 5.3 Validate
 
@@ -393,7 +409,7 @@ ip -br link show snort0                # UP / UNKNOWN
 systemctl is-active snort              # active
 systemctl is-active snort-forward      # active
 pgrep -af pcap2iface                   # forwarder running
-ip -s link show snort0                 # RX packets keep growing
+ip -s link show snort0                 # TX packets keep growing (the forwarder sends onto snort0)
 sudo tcpdump -i snort0 -n -c 5         # packets arriving
 ```
 
@@ -427,7 +443,7 @@ Check where the chain broke, in this order **[WSL]**:
 ```bash
 uptime; journalctl --list-boots --no-pager | tail -2    # did WSL restart?
 systemctl is-active snort0-iface snort snort-forward     # all "active"
-ip -s link show snort0                                   # RX packets 0 → forwarder not delivering
+ip -s link show snort0                                   # TX packets not growing → forwarder not delivering
 journalctl -u snort-forward -n 20 --no-pager             # dumpcap errors (adapter name, permissions)
 ```
 With `snort-forward.service` enabled (9.1) the forwarder comes back by itself. Without it,

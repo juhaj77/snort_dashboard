@@ -1,6 +1,6 @@
 // Live network view: who this machine talks to, from the OS's own tools.
 //
-// GET /network                       sources and installed tools
+// GET /network                       sources, installed tools, Snort's HOME_NET
 // GET /network/snapshot?source=      connections, listening sockets, neighbours, wire names
 // GET /network/trace/:ip?source=     traceroute / tracert to ip
 // GET /network/scan/:ip              nmap service scan (private / link-local addresses only)
@@ -12,6 +12,7 @@
 const express = require('express')
 const net = require('net')
 const T = require('../lib/net/tools')
+const homeNet = require('../lib/net/homeNet')
 const { isLocalTarget } = require('../lib/net/parse')
 const { cachedHistory } = require('../lib/net/history')
 
@@ -54,6 +55,7 @@ router.get('/', (req, res) => {
         .map(k => [k, Object.fromEntries(Object.entries(t[k]).map(([n, v]) => [n, !!v]))])),
     },
     wire: T.wireStatus(),
+    homeNet: homeNet.read(),
   })
 })
 

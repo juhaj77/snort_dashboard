@@ -7,7 +7,7 @@ import { useWidth, tipPosition } from '../overview/charts'
 import { fmtClock, fmtDateTime, fmtNum, fmtStep } from '../overview/format'
 import {
   GROUP_BY, RULES, SCOPE_LABEL, attention, attentionCount, buildPeers, layout, matches, nodeColor, nodeRadius,
-  portLabel, summary, topLevel,
+  portLabel, providerPrefixes, summary, topLevel,
 } from './netModel'
 
 const GRAPH_H = 620
@@ -185,6 +185,34 @@ const NodeTip = ({ p, x, y, width, win }) => {
       {n.app && <div className="tip-row"><strong /><span>AppID: {[...n.appid.keys()].slice(0, 3).join(', ')}</span></div>}
       {n.signals.map(x => <div key={x.id} className="tip-row"><strong><i className="swatch" style={{ background: levelColor(x.level) }} /></strong><span>{x.label}</span></div>)}
       <div className="tip-foot">{SCOPE_LABEL[n.scope]}{n.live ? '' : ' · no open connection'} · click for details</div>
+    </div>
+  )
+}
+
+// The internet provider's IPv6 prefix of this machine, and whether Snort's HOME_NET still
+// covers it. Providers change the prefix now and then; HOME_NET has to follow by hand.
+const ProviderPrefix = ({ addrs, homeNet }) => {
+  const list = providerPrefixes(addrs, (homeNet && homeNet.nets) || [])
+  if (!list.length) return null
+  const names = list.map(p => p.prefix).join(', ')
+  const file = homeNet && homeNet.file
+  if (!homeNet) {
+    return <div className="muted">Provider IPv6 prefix {names} · the server does not report Snort's HOME_NET yet. Restart the server to check the prefix against it.</div>
+  }
+  if (homeNet.value === null) {
+    return <div className="muted">Provider IPv6 prefix {names} · Snort's HOME_NET was not found in {homeNet.dir}, so it is not checked.</div>
+  }
+  if (homeNet.value === 'any') {
+    return <div className="muted">Provider IPv6 prefix {names} · Snort's HOME_NET is 'any' ({file}). Set it to your networks, including this prefix; see snort/snort.lua.</div>
+  }
+  const missing = list.filter(p => !p.inHomeNet)
+  if (!missing.length) {
+    return <div className="muted" title={`HOME_NET = ${homeNet.value}`}>Provider IPv6 prefix {names} · inside Snort's HOME_NET ({file})</div>
+  }
+  return (
+    <div className="warn">
+      Provider IPv6 prefix {missing.map(p => p.prefix).join(', ')} is not inside Snort's HOME_NET ({homeNet.value}).
+      The internet provider has probably changed it: update HOME_NET in {file} and restart Snort (sudo systemctl restart snort).
     </div>
   )
 }
@@ -574,6 +602,7 @@ function Network() {
       {discovered && discovered.hosts && <div className="muted">LAN discovery found {discovered.hosts.length} devices in {discovered.networks.join(', ')}.</div>}
 
       {!snapshot ? (!snap.error && <Status text="Reading connections…" />) : <>
+        <ProviderPrefix addrs={snapshot.host.addrs} homeNet={info && info.homeNet} />
         <div className="kpis kpis-6">
           <Kpi label="Remote hosts" value={fmtNum(s.hosts)} sub={`${s.netHosts} internet · ${s.lanHosts} local`} />
           <Kpi label="Connections" value={fmtNum(s.connections)} sub={`${s.outbound} out · ${s.inbound} in`} />
