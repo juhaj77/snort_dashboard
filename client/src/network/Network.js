@@ -191,7 +191,7 @@ const NodeTip = ({ p, x, y, width, win }) => {
 
 // The internet provider's IPv6 prefix of this machine, and whether Snort's HOME_NET still
 // covers it. Providers change the prefix now and then; HOME_NET has to follow by hand.
-const ProviderPrefix = ({ addrs, homeNet }) => {
+const providerNote = (addrs, homeNet) => {
   const list = providerPrefixes(addrs, (homeNet && homeNet.nets) || [])
   if (!list.length) return null
   const names = list.map(p => p.prefix).join(', ')
@@ -566,6 +566,16 @@ function Network() {
   const toggle = k => setOpts(o => ({ ...o, [k]: !o[k] }))
   const tools = (info && info.tools) || {}
 
+  // Informational notes, shown under Listening ports where the narrow column has room
+  const notes = [
+    snapshot && providerNote(snapshot.host.addrs, info && info.homeNet),
+    ...(cover ? [['Snort alert log', cover.alerts], ['AppID log', cover.appid]] : []).map(([k, c]) =>
+      c.from !== null && c.from > hist.since + 60 &&
+      <div className="muted">{k} starts at {fmtDateTime(c.from)} (Snort restart or log rotation), so it covers only part of the {long}.</div>),
+    !tools.tshark && info && info.platform !== 'windows' && info.wire &&
+      <div className="muted">Tip: with tshark installed, hostnames from DNS answers and TLS SNI captured on {info.wire.iface} are shown for every address. See NETWORK.md.</div>,
+  ].filter(Boolean).map((el, i) => React.cloneElement(el, { key: i }))
+
   return (
     <div className="ov">
       <div className="ov-filters">
@@ -595,14 +605,10 @@ function Network() {
       {snap.error && <Status error={snap.error} />}
       {histState.error && <div className="warn">Snort / AppID history: {String(histState.error.message || histState.error)}</div>}
       {!hist && !histState.error && <div className="muted">Reading the Snort and AppID logs of the {long}…</div>}
-      {cover && [['Snort alert log', cover.alerts], ['AppID log', cover.appid]].map(([k, c]) =>
-        c.from !== null && c.from > hist.since + 60 &&
-        <div key={k} className="muted">{k} starts at {fmtDateTime(c.from)} (Snort restart or log rotation), so it covers only part of the {long}.</div>)}
       {discovered && discovered.error && <div className="warn">LAN discovery: {discovered.error}</div>}
       {discovered && discovered.hosts && <div className="muted">LAN discovery found {discovered.hosts.length} devices in {discovered.networks.join(', ')}.</div>}
 
       {!snapshot ? (!snap.error && <Status text="Reading connections…" />) : <>
-        <ProviderPrefix addrs={snapshot.host.addrs} homeNet={info && info.homeNet} />
         <div className="kpis kpis-6">
           <Kpi label="Remote hosts" value={fmtNum(s.hosts)} sub={`${s.netHosts} internet · ${s.lanHosts} local`} />
           <Kpi label="Connections" value={fmtNum(s.connections)} sub={`${s.outbound} out · ${s.inbound} in`} />
@@ -630,12 +636,13 @@ function Network() {
           <Section title="Hosts" note="alerted first, then by activity · click a row to select">
             <HostsTable peers={peers} selected={selected} onSelect={setSelected} win={win} />
           </Section>
-          <Section title="Listening ports" note="who can connect to this machine">
-            <ListeningTable listening={snapshot.listening} />
-          </Section>
+          <div className="net-aside">
+            <Section title="Listening ports" note="who can connect to this machine">
+              <ListeningTable listening={snapshot.listening} />
+            </Section>
+            {notes.length > 0 && <Section title="Notes" className="net-notes">{notes}</Section>}
+          </div>
         </div>
-        {!tools.tshark && info && info.platform !== 'windows' &&
-          <div className="card-note">Tip: with tshark installed, hostnames from DNS answers and TLS SNI captured on {info.wire.iface} are shown for every address. See NETWORK.md.</div>}
         {tools.tshark && info.wire && info.wire.error && <div className="warn">tshark: {info.wire.error}</div>}
       </>}
     </div>

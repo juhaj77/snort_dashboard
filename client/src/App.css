@@ -592,6 +592,9 @@ html, body { background: var(--bg); }
 .net-tables { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 10px; align-items: start; }
 .net-name { max-width: 22em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .net-listen { max-height: 520px; overflow-y: auto; }
+.net-aside { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.net-notes { font-size: 12px; line-height: 1.45; }
+.net-notes > div + div { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
 @media (max-width: 1200px) {
   .net-main, .net-tables { grid-template-columns: minmax(0, 1fr); }
   .net-side { contain: none; }
