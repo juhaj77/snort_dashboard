@@ -35,7 +35,7 @@ The logs it reads:
 > need the log outputs from [Snort configuration](#snort-configuration); point Snort at your own
 > network interface instead of the WSL-only `snort0`.
 >
-> **Network tab tools** (nmap, traceroute, tshark, net-tools) and how to set them up on Linux,
+> **Network tab tools** (nmap, traceroute, tshark, whois, net-tools) and how to set them up on Linux,
 > WSL and Windows are covered in [NETWORK.md](NETWORK.md).
 
 ## Contents
@@ -88,6 +88,7 @@ details panel with its addresses, ports, protocol, rule (gid:sid:rev) and a read
   - alert and AppID activity over time
   - open connections and the processes behind them
   - alert signatures and names (TLS SNI, HTTP Host, reverse DNS, DNS answers seen by tshark)
+  - who owns an internet address: holder, country and address block (`whois`), and the AS
   - one-click **traceroute**, and an **nmap** port scan for devices on your own network
 - **One device, one node.** The IPv4, IPv6 and link-local addresses of a device (for example
   your router) are recognised by their MAC address and shown as one host.
@@ -167,7 +168,7 @@ Severity follows the Snort priority: **P1 high**, **P2 medium**, **P3 low**, **P
 - Snort 3 with `alert_json`, `perf_monitor` and `appid`, and `appid_listener` from snort3_extra
 - Node.js 18 or newer (tested with 22). On WSL, use a Linux Node such as nvm, not the Windows
   one. See [ENVIRONMENT.md § 11](ENVIRONMENT.md#11-nodejs-environment-for-snort_dashboard).
-- Optional, for the Network tab: nmap, traceroute and tshark (see [NETWORK.md](NETWORK.md))
+- Optional, for the Network tab: nmap, traceroute, tshark and whois (see [NETWORK.md](NETWORK.md))
 
 ## Snort configuration
 
@@ -265,7 +266,7 @@ All endpoints return JSON. Log files are read from the end, so large logs don't 
 | `GET /appid/:amount` | the newest `amount` AppID events from `appid.json` |
 | `GET /perf` | `perf_monitor_base.csv` rows of the current Snort run, header first |
 | `GET /perf?since=<epoch s>&points=<n>` | rows of the current run from `since` (`0` = whole run), folded into at most `n` (default 600) samples: counters summed, gauges newest; with run start and end |
-| `GET /network…` | connection snapshot, per-address alert/AppID history, traceroute, nmap scan, LAN discovery, reverse DNS; see [NETWORK.md § API](NETWORK.md#api) |
+| `GET /network…` | connection snapshot, per-address alert/AppID history, traceroute, nmap scan, LAN discovery, reverse DNS, whois; see [NETWORK.md § API](NETWORK.md#api) |
 | socket.io `:3009`, event `json` | each new `appid.json` line as it is written |
 
 Malformed or half-written log lines are skipped.

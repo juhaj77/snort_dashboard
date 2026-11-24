@@ -57,7 +57,7 @@ const tools = () => {
   const t = {
     linux: IS_WIN ? null : {
       ss: which('ss'), netstat: which('netstat'), ip: which('ip'), arp: which('arp'),
-      traceroute: which('traceroute'), nmap: which('nmap'), tshark: which('tshark'),
+      traceroute: which('traceroute'), nmap: which('nmap'), tshark: which('tshark'), whois: which('whois'),
     },
     windows: (IS_WIN || IS_WSL) ? {
       netstat: winSys('netstat'), tasklist: winSys('tasklist'), arp: winSys('arp'), tracert: winSys('tracert'),

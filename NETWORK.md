@@ -11,6 +11,8 @@ Select a host to see:
 - the Snort alerts that involve it, grouped by signature
 - what AppID recognised
 - its names (from TLS SNI and HTTP Host lines in `appid.json`, reverse DNS, and DNS answers captured by tshark)
+- for internet addresses, who owns the network: the holder, country and address block from
+  `whois`, and the autonomous system (AS) that routes it
 
 From the same panel you can run a **traceroute** or, for devices in your own network, an
 **nmap port scan**.
@@ -29,6 +31,7 @@ to be configured for the basic map. The optional tools below add more detail.
 - [Running the server natively on Windows](#running-the-server-natively-on-windows)
 - [Hostnames from the wire (tshark)](#hostnames-from-the-wire-tshark)
 - [Port scans and LAN discovery (nmap)](#port-scans-and-lan-discovery-nmap)
+- [Who owns an address (whois)](#who-owns-an-address-whois)
 - [One device, several addresses](#one-device-several-addresses)
 - [Signals: why a host is flagged](#signals-why-a-host-is-flagged)
 - [Provider IPv6 prefix and Snort's HOME_NET](#provider-ipv6-prefix-and-snorts-home_net)
@@ -50,6 +53,7 @@ to be configured for the basic map. The optional tools below add more detail.
 | Port scan, LAN discovery | `nmap` | `nmap.exe` (Nmap for Windows) | no |
 | Hostnames from DNS answers / TLS SNI | `tshark` | – | no |
 | Reverse DNS | Node.js built-in | Node.js built-in | – |
+| Network owner of internet addresses | `whois` (+ DNS to Team Cymru) | – | no; without `whois` only the AS name is shown |
 | Snort alerts and AppID per host | the existing Snort logs | – | no |
 
 Tools are looked up on every request, so a tool you install shows up without restarting the
@@ -63,7 +67,7 @@ Install the tools (Debian/Ubuntu):
 
 ```bash
 sudo apt update
-sudo apt install nmap traceroute net-tools tshark
+sudo apt install nmap traceroute net-tools tshark whois
 ```
 
 - `iproute2` (`ss`, `ip`) is already installed on practically every distribution. `net-tools`
@@ -71,8 +75,8 @@ sudo apt install nmap traceroute net-tools tshark
 - During the `tshark` install, Debian asks whether non-superusers may capture packets. Either
   answer works, because the server runs as root (see the README).
 
-On Fedora: `sudo dnf install nmap traceroute net-tools wireshark-cli`.
-On Arch: `sudo pacman -S nmap traceroute net-tools wireshark-cli`.
+On Fedora: `sudo dnf install nmap traceroute net-tools wireshark-cli whois`.
+On Arch: `sudo pacman -S nmap traceroute net-tools wireshark-cli whois`.
 
 Then restart the server:
 
@@ -146,8 +150,8 @@ stay empty.
    ```
 4. Start the client as described in the README and open the **Network** tab.
 
-`netstat`, `tasklist`, `arp` and `tracert` are built into Windows. The tshark name capture runs
-only on Linux.
+`netstat`, `tasklist`, `arp` and `tracert` are built into Windows. The tshark name capture and
+the `whois` lookup run only on Linux; on Windows the owner row shows the AS name from Team Cymru.
 
 ---
 
@@ -193,6 +197,42 @@ against your ISP's terms. Only scan your own devices. On a network you do not ma
 work or a dormitory, ask the administrator first.
 
 At most two traceroutes or scans run at a time.
+
+---
+
+## Who owns an address (whois)
+
+Many internet addresses have no reverse DNS name, or only a generic one, and the address alone
+does not tell much. For an internet address the host panel shows two extra rows:
+
+| Row | Example | Source |
+|---|---|---|
+| **Owner** | `Google LLC · US`, `GOOGLE-CLOUD · 2600:1900::/28` | `whois <ip>`: the holder, country, network name and address block registered at the regional internet registry (ARIN, RIPE NCC, APNIC, LACNIC, AFRINIC) |
+| **AS** | `AS396982 · GOOGLE-CLOUD-PLATFORM - Google LLC, US` | [Team Cymru IP-to-ASN](https://www.team-cymru.com/ip-asn-mapping) over DNS: the network that announces the address on the internet |
+
+Install `whois` with the other tools (see [Linux (and WSL)](#linux-and-wsl)). Without it the
+AS lookup still works, and the AS holder is shown as the owner.
+
+- **What it tells you.** The owner is the organisation the address block belongs to: a cloud,
+  a CDN, an internet provider or a company. For cloud and CDN addresses (Google Cloud, AWS,
+  Azure, Cloudflare, Akamai) it is the platform, not the customer service running on it. Use it
+  together with the names from TLS SNI / tshark.
+- **Only internet addresses** are looked up. Private, link-local, loopback, multicast and
+  documentation addresses are never sent anywhere.
+- **Privacy.** The lookup sends the address to the registry's whois server and to Team Cymru's
+  DNS servers. The same is true of the reverse DNS lookup, which goes to your DNS resolver.
+- **Limits.** Registries rate-limit clients that ask too often, so at most two `whois` processes
+  run at a time and answers are cached in memory for 24 hours. A lookup is made only when you
+  open a host.
+
+To look up an address by hand (`host` is in the `bind9-host` package on Debian/Ubuntu, `bind-utils`
+on Fedora, `bind` on Arch):
+
+```bash
+whois 140.82.121.4                                   # owner, country, address block
+host -t TXT 4.121.82.140.origin.asn.cymru.com        # AS number and prefix (octets reversed)
+host -t TXT AS36459.asn.cymru.com                    # AS name
+```
 
 ---
 
@@ -309,6 +349,7 @@ Tool paths are found automatically:
 | `GET /network/scan/:ip` | nmap ports `[{port, proto, state, service, version}]`; 403 for non-local addresses |
 | `GET /network/discover` | hosts that answered the ping sweep |
 | `GET /network/rdns/:ip` | reverse DNS names |
+| `GET /network/whois/:ip` | `{public, name, netname, country, range, asn, asName, sources, error}`; `{public: false}` for local addresses |
 | `GET /network/history?window=3600\|21600\|86400` | per address: alert counts by priority, top signatures, AppID sessions, apps, service ports, TLS/HTTP names, first/last seen, 30 time slices; plus where the logs start (`coverage`) |
 
 `:ip` must be a literal IPv4 or IPv6 address. The tools run without a shell and with fixed
@@ -344,6 +385,8 @@ only from your own machine or a trusted network.
 | Many processes show as `?` | The server is not running as root (Linux) or elevated (Windows). |
 | **Traceroute** is disabled | Install `traceroute` (Linux). On Windows and WSL, `tracert.exe` is used. |
 | **Port scan** / **Discover LAN** disabled | Install `nmap`. |
+| Owner shows only the AS name, or "whois is not installed" | Install `whois` (`sudo apt install whois`). No restart is needed. |
+| Owner: "no answer from whois or Team Cymru" | No internet access from the server, or the registry is rate-limiting; open the host again later (failures are not cached). |
 | Port scan says the host did not answer | A firewall on the device drops probes; that is common for phones and Windows PCs. |
 | "tshark: interface snort0 not found" | Start the forwarder (ENVIRONMENT.md § 7) or set `NET_CAPTURE_IFACE`. |
 | Map, alerts and AppID stop updating after WSL restarted | The forwarder did not come back: enable `snort-forward.service` (ENVIRONMENT.md § 9.1, "After a WSL restart" in § 10). |

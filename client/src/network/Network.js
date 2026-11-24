@@ -7,7 +7,7 @@ import { useWidth, tipPosition } from '../overview/charts'
 import { fmtClock, fmtDateTime, fmtNum, fmtStep } from '../overview/format'
 import {
   GROUP_BY, RULES, SCOPE_LABEL, attention, attentionCount, buildPeers, layout, matches, nodeColor, nodeRadius,
-  portLabel, providerPrefixes, summary, topLevel,
+  portLabel, providerPrefixes, scopeOf, summary, topLevel,
 } from './netModel'
 
 const GRAPH_H = 620
@@ -321,6 +321,19 @@ const Signals = ({ n, win }) => (
   </>
 )
 
+const OwnerRows = ({ w, whoisTool }) => {
+  if (!w) return <Row k="Owner"><span className="muted">looking up…</span></Row>
+  if (w.public === false) return null
+  if (w.error && !w.name && !w.asn) {
+    return <Row k="Owner"><span className="muted">{w.error}{whoisTool === false ? ' · see NETWORK.md' : ''}</span></Row>
+  }
+  return <>
+    <Row k="Owner">{w.name || <span className="muted">unknown</span>}{w.country && <span className="muted"> · {w.country}</span>}
+      {(w.netname || w.range) && <div className="muted mono">{[w.netname, w.range].filter(Boolean).join(' · ')}</div>}</Row>
+    {w.asn && <Row k="AS"><span className="mono">AS{w.asn}</span>{w.asName && <span className="muted"> · {w.asName}</span>}</Row>}
+  </>
+}
+
 const Details = ({ n, info, source, results, run, onClose, hist, win }) => {
   const [rdns, setRdns] = useState({})
   // the panel scrolls on its own; start a newly selected host from the top
@@ -335,6 +348,15 @@ const Details = ({ n, info, source, results, run, onClose, hist, win }) => {
         .then(r => setRdns(s => ({ ...s, [ip]: r.names || [] })), () => setRdns(s => ({ ...s, [ip]: [] })))
     })
   }, [n, rdns])
+  // network owner of public addresses (whois / Team Cymru); one lookup per device is enough
+  const [owner, setOwner] = useState({})
+  const ownerIp = n ? n.addrs.find(a => scopeOf(a) === 'internet') : null
+  useEffect(() => {
+    if (!ownerIp || ownerIp in owner) return
+    setOwner(s => ({ ...s, [ownerIp]: null }))
+    getJson('/network/whois/' + encodeURIComponent(ownerIp))
+      .then(r => setOwner(s => ({ ...s, [ownerIp]: r })), e => setOwner(s => ({ ...s, [ownerIp]: { error: 'lookup failed (' + e.message + '); restart the server if it is older than this page' } })))
+  }, [ownerIp, owner])
   if (!n) {
     return <div className="nd nd-empty">
       <p>Select a host in the graph or the table to see its connections, Snort alerts and AppID data, and to run a traceroute or a port scan.</p>
@@ -356,6 +378,7 @@ const Details = ({ n, info, source, results, run, onClose, hist, win }) => {
 
       <div className="nd-sec">Address</div>
       <Row k="Names">{names.length ? names.slice(0, 4).map(x => <div key={x} className="mono">{x}</div>) : <span className="muted">{n.addrs.every(ip => Array.isArray(rdns[ip])) ? 'none known' : 'looking up…'}</span>}</Row>
+      {ownerIp && <OwnerRows w={owner[ownerIp]} whoisTool={info && info.tools && info.tools.whois} />}
       {n.addrs.length > 1 && <Row k="Addresses">{n.addrs.map(a => <div key={a} className="mono">{a}</div>)}
         <div className="muted">one device: same MAC address</div></Row>}
       <Row k="Network">{SCOPE_LABEL[n.scope]}{n.gateway && <span className="tag tag-muted" style={{ marginLeft: 6 }}>default gateway</span>}</Row>

@@ -6,6 +6,7 @@
 // GET /network/scan/:ip              nmap service scan (private / link-local addresses only)
 // GET /network/discover              nmap ping sweep of the local networks
 // GET /network/rdns/:ip              reverse DNS
+// GET /network/whois/:ip             network owner and AS of a public address (whois, Team Cymru)
 // GET /network/history?window=       per-address Snort alert and AppID counts over 1 h / 6 h / 24 h
 //
 // Read-only: nothing is configured or written. Targets must be literal IP addresses.
@@ -13,6 +14,7 @@ const express = require('express')
 const net = require('net')
 const T = require('../lib/net/tools')
 const homeNet = require('../lib/net/homeNet')
+const whois = require('../lib/net/whois')
 const { isLocalTarget } = require('../lib/net/parse')
 const { cachedHistory } = require('../lib/net/history')
 
@@ -51,6 +53,7 @@ router.get('/', (req, res) => {
       nmap: !!((t.linux && t.linux.nmap) || (t.windows && t.windows.nmap)),
       tshark: !!(t.linux && t.linux.tshark),
       netTools: !!(t.linux && t.linux.netstat),
+      whois: !!(t.linux && t.linux.whois),
       found: Object.fromEntries(['windows', 'linux'].filter(k => t[k])
         .map(k => [k, Object.fromEntries(Object.entries(t[k]).map(([n, v]) => [n, !!v]))])),
     },
@@ -92,6 +95,13 @@ router.get('/discover', job(() => T.discover()))
 router.get('/rdns/:ip', async (req, res) => {
   const ip = ipParam(req, res)
   if (ip) res.json({ ip, names: await T.reverse(ip) })
+})
+
+router.get('/whois/:ip', async (req, res) => {
+  const ip = ipParam(req, res)
+  if (!ip) return
+  const t = T.tools()
+  try { res.json(await whois.lookup(ip, (t.linux && t.linux.whois) || null)) } catch (e) { res.status(500).json({ error: e.message }) }
 })
 
 // Per-address Snort alert and AppID history for 1 h, 6 h or 24 h (counts from the logs)
