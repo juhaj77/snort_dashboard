@@ -69,6 +69,10 @@ Pick a time window (15 min, 1 h, 6 h, 24 h or the latest 5,000 alerts) to see:
 - the AppID application mix
 - an event timeline and a recent-events list
 
+The activity chart and the alert count always cover the whole window. The lists and top
+charts use at most the newest 20,000 alerts of the window; click an older column of the chart
+to load that interval.
+
 Click any bar, severity or time column and **every chart filters to it**. An event opens a
 details panel with its addresses, ports, protocol, rule (gid:sid:rev) and a ready-made
 **Wireshark filter**.

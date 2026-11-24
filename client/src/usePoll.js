@@ -5,7 +5,8 @@ import { getJson } from './api'
  * Poll a JSON endpoint; keeps the previous data while refetching.
  * `request()` is called on every load and returns { path, meta }; `meta` is kept
  * next to the data it produced (e.g. the `since` used for that fetch).
- * The poll restarts whenever `key` changes.
+ * The poll restarts whenever `key` changes. A `request()` returning null fetches nothing
+ * (the state is cleared) until the next key change.
  */
 export const usePoll = (request, intervalMs, key) => {
   const [state, setState] = useState({ data: null, meta: null, error: null, loading: true, updated: null })
@@ -15,8 +16,10 @@ export const usePoll = (request, intervalMs, key) => {
   requestRef.current = request
   const load = useCallback(async () => {
     clearTimeout(timer.current)
+    const req = requestRef.current()
+    if (!req) { setState({ data: null, meta: null, error: null, loading: false, updated: null }); return }
     setState(s => ({ ...s, loading: true }))
-    const { path, meta } = requestRef.current()
+    const { path, meta } = req
     try {
       const data = await getJson(path)
       if (alive.current) setState({ data, meta, error: null, loading: false, updated: Date.now() })

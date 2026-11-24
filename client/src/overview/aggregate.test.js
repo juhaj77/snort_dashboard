@@ -1,6 +1,6 @@
 import {
   hostOf, normalizeAlert, normalizeAlerts, timeBins, pickStep, topN,
-  severityCounts, addrScope, appIdSessions, appDistribution, windowAlerts,
+  severityCounts, addrScope, appIdSessions, appDistribution, windowAlerts, statsBins,
 } from './aggregate'
 
 const alert = (over = {}) => ({
@@ -123,4 +123,22 @@ test('appIdSessions keeps the last known value per session', () => {
   const d = appDistribution(s, 'payload')
   expect(d.pending).toBe(2)
   expect(d.rows).toEqual([])
+})
+
+test('statsBins sums server counts by severity, with sev / rule filters only', () => {
+  const stats = { since: 1000, step: 60, bins: 3, rules: [
+    { rule: '116:414:1', priority: 3, counts: [5, 0, 2] },
+    { rule: '1:1384:8', priority: 2, counts: [1, 1, 0] },
+    { rule: 'x', priority: 9, counts: [0, 0, 1] },
+  ] }
+  const all = statsBins(stats)
+  expect(all.total).toBe(10)
+  expect(all.step).toBe(60)
+  expect(all.bins.map(b => b.t)).toEqual([1000, 1060, 1120])
+  expect(all.bins[0].counts).toEqual({ 1: 0, 2: 1, 3: 5, 4: 0, 0: 0 })
+  expect(all.bins[2].counts[0]).toBe(1)
+  expect(statsBins(stats, [{ field: 'sev', value: 2 }]).total).toBe(2)
+  expect(statsBins(stats, [{ field: 'rule', value: '116:414:1' }]).bins.map(b => b.total)).toEqual([5, 0, 2])
+  expect(statsBins(stats, [{ field: 'src', value: '1.2.3.4' }])).toBe(null)
+  expect(statsBins(null)).toBe(null)
 })

@@ -6,13 +6,16 @@ import EventDetails from './EventDetails'
 import { Section, Kpi } from './ui'
 import AppIdSummary from './AppIdSummary'
 import {
-  windowAlerts, timeBins, topN, severityCounts, distinctCount, addrScope,
+  windowAlerts, timeBins, statsBins, pickStep, topN, severityCounts, distinctCount, addrScope,
 } from './aggregate'
 import { sevLabel } from './severity'
 import { fmtClock, fmtDay, fmtNum, fmtSpan, fmtStep, hostPort } from './format'
 
 // Time windows ask the server for alerts since a moment (`?since=`), capped at
 // TIME_CAP alerts; the count window is the old "latest N" behaviour.
+// The activity chart and the alert count come from the server's per-rule counts
+// (/alerts_stats), which cover the whole window even when more than TIME_CAP alerts
+// happened. A column outside the loaded alerts is fetched on its own when clicked.
 const WINDOWS = [
   { id: '15m', label: '15 min', minutes: 15 },
   { id: '1h', label: '1 h', minutes: 60 },
@@ -51,6 +54,14 @@ function Overview() {
     // ask for one more than the cap so truncation can be detected
     return { path: `/alerts_all/${TIME_CAP + 1}?since=${since}`, meta: { win, since, now } }
   }, REFRESH_MS, windowId)
+  const [statsState, reloadStats] = usePoll(() => {
+    if (win.count) return null
+    const span = win.minutes * 60
+    const step = pickStep(span, 60)
+    const until = (Math.floor(Date.now() / 1000 / step) + 1) * step // current bin included, still filling
+    const bins = Math.ceil(span / step)
+    return { path: `/alerts_stats?since=${until - bins * step}&until=${until}&step=${step}` }
+  }, REFRESH_MS, windowId)
   const [appidState, reloadAppid] = usePoll(() => ({ path: '/appid/5000' }), REFRESH_MS, 'appid')
   const [focus, setFocus] = useState([]) // [{ field, value }]
   const [slice, setSlice] = useState(null) // { from, to } from the activity chart
@@ -68,22 +79,40 @@ function Overview() {
       : [...f.filter(x => x.field !== field), { field, value }])
   }, [])
 
-  const focused = useMemo(
-    () => alerts.filter(a => focus.every(f => FOCUS[f.field].get(a) === f.value)),
-    [alerts, focus])
-  const inView = useMemo(
-    () => (slice ? focused.filter(a => a.seconds >= slice.from && a.seconds < slice.to) : focused),
-    [focused, slice])
-
   const dataRange = alerts.length ? [alerts[0].seconds, alerts[alerts.length - 1].seconds] : null
+  // a clicked column older than the loaded alerts: load that interval by itself
+  const sliceOutside = !!(slice && truncated && dataRange && slice.from < dataRange[0])
+  const [sliceState] = usePoll(() => (sliceOutside
+    ? { path: `/alerts_all/${TIME_CAP + 1}?since=${slice.from}&until=${slice.to}`, meta: { since: slice.from } }
+    : null), REFRESH_MS, sliceOutside ? `${slice.from}-${slice.to}` : 'none')
+  const sliceAlerts = useMemo(
+    () => (sliceOutside && sliceState.data ? windowAlerts(sliceState.data, slice.from, TIME_CAP) : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [sliceOutside, sliceState.data])
+
+  const matchFocus = useCallback(a => focus.every(f => FOCUS[f.field].get(a) === f.value), [focus])
+  const focused = useMemo(() => alerts.filter(matchFocus), [alerts, matchFocus])
+  const inView = useMemo(() => {
+    if (!slice) return focused
+    const base = sliceAlerts ? sliceAlerts.alerts.filter(matchFocus) : focused
+    return base.filter(a => a.seconds >= slice.from && a.seconds < slice.to)
+  }, [focused, slice, sliceAlerts, matchFocus])
+  const sliceLoading = sliceOutside && !sliceAlerts
   // Time window: the axis spans the whole window (quiet periods stay visible),
   // except the part lost to truncation, which the data doesn't cover.
   const fullRange = meta.since !== undefined
     ? [truncated && dataRange ? dataRange[0] : meta.since, Math.max(meta.now, dataRange ? dataRange[1] : 0)]
     : dataRange || [0, 0]
-  const activity = useMemo(() => timeBins(focused, 60, alerts.length ? fullRange : undefined),
+  const fromStats = useMemo(() => (meta.since !== undefined ? statsBins(statsState.data, focus) : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [statsState.data, focus])
+  const loadedBins = useMemo(() => timeBins(focused, 60, alerts.length ? fullRange : undefined),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [focused, alerts])
+  const activity = fromStats || loadedBins
+  // alerts in the whole window (all filters applied), when the server's counts can tell
+  const windowTotal = fromStats ? fromStats.total : null
+  const sliceTotal = fromStats && slice ? (fromStats.bins.find(b => b.t === slice.from) || {}).total ?? null : null
 
   const sev = useMemo(() => severityCounts(inView), [inView])
   const tops = useMemo(() => ({
@@ -95,9 +124,13 @@ function Overview() {
     cls: topN(inView, a => a.cls, 8),
   }), [inView])
 
+  // with the server's counts the alert total is exact even beyond the loaded alerts
+  const alertCount = (slice ? sliceTotal : windowTotal) ?? inView.length
   const viewRange = inView.length ? [inView[0].seconds, inView[inView.length - 1].seconds] : fullRange
   // rate denominator: the selected interval, else the window, else the data's own span
-  const span = slice ? slice.to - slice.from : meta.since !== undefined ? fullRange[1] - fullRange[0] : viewRange[1] - viewRange[0]
+  const span = slice ? slice.to - slice.from
+    : meta.since !== undefined ? (windowTotal !== null ? meta.now - meta.since : fullRange[1] - fullRange[0])
+      : viewRange[1] - viewRange[0]
   const timeline = inView.length > TIMELINE_CAP ? inView.slice(-TIMELINE_CAP) : inView
   const timelineRange = timeline.length ? [timeline[0].seconds, timeline[timeline.length - 1].seconds] : viewRange
   const recent = useMemo(() => inView.slice(-RECENT_ROWS).reverse(), [inView])
@@ -106,7 +139,7 @@ function Overview() {
   const pick = field => key => toggleFocus(field, key)
   const isFiltered = focus.length > 0 || slice
 
-  const refresh = () => { reloadAlerts(); reloadAppid() }
+  const refresh = () => { reloadAlerts(); reloadStats(); reloadAppid() }
 
   if (!alertsState.data) {
     return <Status error={alertsState.error} text="Loading alerts…" />
@@ -127,15 +160,18 @@ function Overview() {
             </button>)}
         </div>
         <span className="muted">
-          {alerts.length
+          {windowTotal !== null && !focus.length && windowTotal > 0
+            ? <><strong className="hl">{fmtNum(windowTotal)}</strong> alerts · {fmtDay(meta.since)} {fmtClock(meta.since, false)} – {fmtClock(meta.now, false)}</>
+            : alerts.length
             ? <><strong className="hl">{fmtNum(alerts.length)}</strong> alerts · {fmtDay(fullRange[0])} {fmtClock(fullRange[0], false)} – {fmtClock(fullRange[1], false)}
                 {!meta.since && <> · covering <strong className="hl">{fmtSpan(fullRange[1] - fullRange[0])}</strong></>}</>
             : meta.since !== undefined ? `no alerts in the last ${win.label}` : 'no alerts in alert_json.txt'}
         </span>
         {truncated &&
-          <span className="warn" title={`More than ${fmtNum(TIME_CAP)} alerts in this window; the oldest ones were not loaded.`}>
-            ⚠ limited to newest {fmtNum(TIME_CAP)} — covers only {fmtSpan(fullRange[1] - fullRange[0])} of {win.label}
+          <span className="warn" title={`More than ${fmtNum(TIME_CAP)} alerts in this window. The activity chart and the alert count cover the whole window; the top lists, severity split and recent alerts use the newest ${fmtNum(TIME_CAP)}, unless you click an older column of the chart.`}>
+            ⚠ lists use the newest {fmtNum(TIME_CAP)} ({fmtSpan(fullRange[1] - fullRange[0])} of {win.label})
           </span>}
+        {sliceLoading && <span className="muted">loading {fmtClock(slice.from)} – {fmtClock(slice.to)}…</span>}
         {focus.map(f =>
           <button key={f.field} type="button" className="chip" onClick={() => toggleFocus(f.field, f.value)}>
             {FOCUS[f.field].label}: <strong>{FOCUS[f.field].show ? FOCUS[f.field].show(f.value) : String(f.value)}</strong> ×
@@ -155,9 +191,9 @@ function Overview() {
       {/* ---- headline numbers + severity split ---- */}
       <div className="ov-summary">
         <div className="kpis">
-          <Kpi label={isFiltered ? 'Alerts in view' : 'Alerts'} value={fmtNum(inView.length)}
-               sub={isFiltered ? `of ${fmtNum(alerts.length)} loaded` : dropped ? `${fmtNum(dropped)} unreadable skipped` : meta.since !== undefined ? `last ${win.label}` : 'in window'} />
-          <Kpi label="Rate" value={span > 0 ? (inView.length / (span / 60)).toFixed(1) : '—'} sub="alerts / min avg" />
+          <Kpi label={isFiltered ? 'Alerts in view' : 'Alerts'} value={fmtNum(alertCount)}
+               sub={isFiltered ? (alertCount !== inView.length || windowTotal !== null ? `filtered, last ${win.label}` : `of ${fmtNum(alerts.length)} loaded`) : dropped ? `${fmtNum(dropped)} unreadable skipped` : meta.since !== undefined ? `last ${win.label}` : 'in window'} />
+          <Kpi label="Rate" value={span > 0 ? (alertCount / (span / 60)).toFixed(1) : '—'} sub="alerts / min avg" />
           <Kpi label="Sources" value={fmtNum(distinctCount(inView, a => a.srcIp))} sub="distinct IPs" />
           <Kpi label="Destinations" value={fmtNum(distinctCount(inView, a => a.dstIp))} sub="distinct IPs" />
           <Kpi label="Signatures" value={fmtNum(tops.rule.distinct)} sub="distinct rules" />
@@ -169,8 +205,8 @@ function Overview() {
       </div>
 
       {/* ---- activity over time ---- */}
-      <Section title="Alert activity" note={activity.step ? `${fmtStep(activity.step)} intervals, stacked by severity · click a column to focus that interval` : null}>
-        {focused.length
+      <Section title="Alert activity" note={activity.step ? `${fmtStep(activity.step)} intervals, stacked by severity${!fromStats && truncated ? ` · newest ${fmtNum(TIME_CAP)} alerts only (this filter is not in the server's counts)` : ''} · click a column to focus that interval` : null}>
+        {(fromStats ? fromStats.total : focused.length)
           ? <ActivityChart bins={activity.bins} step={activity.step} selectedT={slice ? slice.from : null}
                            onSelect={b => setSlice(b ? { from: b.t, to: b.t + activity.step } : null)} />
           : <div className="viz-empty">No alerts match the filters.</div>}

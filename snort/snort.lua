@@ -260,6 +260,16 @@ ips =
 -- below are examples of filters
 -- each table is a list of records
 
+-- snort_dashboard: decoder alert 116:414 "IPv4 packet to broadcast dest address" fires on
+-- every broadcast your own devices send. Smart home devices (e.g. Tuya, UDP port 6667),
+-- printers and media players broadcast every few seconds, which can be most of all alerts
+-- and pushes everything else out of the dashboard's windows. Broadcasts from outside
+-- HOME_NET are still reported.
+suppress =
+{
+    { gid = 116, sid = 414, track = 'by_src', ip = HOME_NET },
+}
+
 --[[
 suppress =
 {

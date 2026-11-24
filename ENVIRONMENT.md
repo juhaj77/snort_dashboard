@@ -310,9 +310,18 @@ sudo tail -f /var/log/snort/alert_json.txt
 ```
 
 With `enable_builtin_rules = true` (set in `snort.lua`), ordinary LAN traffic quickly
-produces decoder alerts such as `116:414 "(ipv4) IPv4 packet to broadcast dest address"`.
-`/usr/local/etc/snort/rules/local.rules` also contains a test rule (`sid:1000001`, any ICMP).
-Running `ping 8.8.8.8` on Windows should trigger it.
+produces decoder alerts. (`116:414 "IPv4 packet to broadcast dest address"` is suppressed in
+`snort.lua` for broadcasts from `HOME_NET`, because smart home devices, printers and media
+players broadcast every few seconds.) `/usr/local/etc/snort/rules/local.rules` also contains a
+test rule (`sid:1000001`, any ICMP). Running `ping 8.8.8.8` on Windows should trigger it.
+
+**Disable the test rule once Snort works.** It alerts on every ICMP packet, and with IPv6 the
+router's neighbour discovery and router advertisements alone produce hundreds of alerts an hour:
+
+```bash
+sudo sed -i 's/^alert icmp any any -> any any (msg:"LOCAL ICMP test"/# &/' /usr/local/etc/snort/rules/local.rules
+sudo systemctl restart snort
+```
 
 ---
 

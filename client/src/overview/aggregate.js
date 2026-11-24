@@ -106,6 +106,26 @@ export const timeBins = (alerts, target = 60, range) => {
 }
 
 /**
+ * Activity bins from the server's per-rule counts (`/alerts_stats`), which cover the whole
+ * window however many alerts it has. Severity and rule filters can be applied to those
+ * counts; for any other filter this returns null and the loaded alerts are used instead.
+ */
+export const STATS_FIELDS = ['sev', 'rule']
+export const statsBins = (stats, focus = []) => {
+  if (!stats || !Array.isArray(stats.rules) || focus.some(f => !STATS_FIELDS.includes(f.field))) return null
+  const want = Object.fromEntries(focus.map(f => [f.field, f.value]))
+  const bins = Array.from({ length: stats.bins }, (_, i) => ({ t: stats.since + i * stats.step, total: 0, counts: emptySevCounts() }))
+  let total = 0
+  stats.rules.forEach(r => {
+    const p = VALID_PRIORITIES.includes(r.priority) ? r.priority : 0
+    if ('sev' in want && p !== want.sev) return
+    if ('rule' in want && r.rule !== want.rule) return
+    r.counts.forEach((n, i) => { if (n && bins[i]) { bins[i].total += n; bins[i].counts[p] += n; total += n } })
+  })
+  return { step: stats.step, bins, total }
+}
+
+/**
  * Rank values of `keyFn` by count, with a per-severity breakdown.
  * Returns { rows: [{ key, total, counts, sample }], other, missing, distinct }.
  */
